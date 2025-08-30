@@ -1,0 +1,308 @@
+Notes:
+---
+# Deep Research Agentic Workflow (4_lab4.ipynb)
+
+## Summary
+This notebook demonstrates a multi-agent, multi-tool workflow for deep research automation. It orchestrates planning, web search, report writing, and email delivery using specialized agents and structured outputs. The workflow leverages OpenAI's hosted tools (WebSearchTool), Pydantic schemas for output validation, and asynchronous execution for efficiency. It is designed for extensibility, traceability, and robust error handling, making it suitable for business and technical research automation.
+
+---
+
+## Workflow Overview
+
+1. **Planning:**  
+   The PlannerAgent receives a research query and generates a set of web search terms, each with reasoning, using structured output (Pydantic).
+
+2. **Web Search:**  
+   For each planned search term, the SearchAgent uses the WebSearchTool to perform a web search and summarize results.
+
+3. **Report Writing:**  
+   The WriterAgent synthesizes the search results into a detailed markdown report, including a summary and follow-up questions.
+
+4. **Email Delivery:**  
+   The EmailAgent formats the report into HTML and sends it via email using a function tool.
+
+**Collaboration:**  
+- Agents interact via function calls and handoffs, passing structured data between planning, search, writing, and email delivery stages.
+
+---
+
+## How 4_lab4.ipynb Differs from 2_lab2.ipynb and 3_lab3.ipynb
+
+- **Domain:**  
+  2_lab2 and 3_lab3 focus on sales email automation; 4_lab4 automates deep research and reporting.
+
+- **Agent Roles:**  
+  4_lab4 introduces specialized agents for planning, searching, writing, and emailing, rather than just sales/email agents.
+
+- **Tooling:**  
+  Uses OpenAI's hosted WebSearchTool for live web search, not present in previous labs.
+
+- **Structured Outputs:**  
+  Heavily uses Pydantic schemas for planning and report writing, ensuring reliable, typed data flow.
+
+- **Workflow Complexity:**  
+  4_lab4 chains multiple agents in a multi-step pipeline (plan → search → write → email), while previous labs are simpler.
+
+- **Async Execution:**  
+  4_lab4 parallelizes web searches for efficiency.
+
+- **Traceability:**  
+  All agent actions are logged and visualized using OpenAI's trace platform.
+
+---
+
+## Flowchart
+
+```mermaid
+flowchart TD
+    A[User Query] --> B[PlannerAgent: Plan Searches]
+    B --> C[WebSearchPlan (structured output)]
+    C --> D[SearchAgent: Perform Web Searches (WebSearchTool)]
+    D --> E[Search Results]
+    E --> F[WriterAgent: Write Markdown Report]
+    F --> G[ReportData (structured output)]
+    G --> H[EmailAgent: Format & Send Email]
+    H --> I[Email Sent]
+```
+
+---
+
+## High-Level Steps
+
+1. **Setup and Configuration**
+   - Install required packages (`sendgrid`, `pydantic`, etc.)
+   - Set up environment variables and API keys
+   - Import agentic framework components
+
+2. **Agent and Tool Creation**
+   - Define PlannerAgent, SearchAgent, WriterAgent, EmailAgent
+   - Register tools (WebSearchTool, send_email function)
+
+3. **Workflow Orchestration**
+   - Plan searches
+   - Perform web searches in parallel
+   - Write report
+   - Send report via email
+
+4. **Error Handling and Traceability**
+   - Handle API errors, SSL issues, and tool failures
+   - Log all actions using OpenAI trace
+
+---
+
+## Low-Level Steps
+
+1. **Install and Import Packages**
+   - `!pip install sendgrid pydantic`
+   - Import: `dotenv`, `sendgrid`, `os`, `asyncio`, `pydantic`, agentic framework components
+
+2. **Environment Setup**
+   - `load_dotenv(override=True)`
+   - Set API keys in `.env` (for OpenAI, SendGrid, etc.)
+
+3. **Agent Instantiation**
+   - **PlannerAgent:**  
+     Uses Pydantic schema (`WebSearchPlan`) for output
+   - **SearchAgent:**  
+     Uses `WebSearchTool` for live web search
+   - **WriterAgent:**  
+     Uses Pydantic schema (`ReportData`) for output
+   - **EmailAgent:**  
+     Uses function tool to send HTML email
+
+4. **Tool Registration**
+   - Register `WebSearchTool` and `send_email` as tools
+
+5. **Workflow Functions**
+   - `plan_searches(query)`: Plans searches using PlannerAgent
+   - `perform_searches(search_plan)`: Runs searches in parallel using SearchAgent
+   - `write_report(query, search_results)`: Synthesizes report using WriterAgent
+   - `send_email(report)`: Sends report via EmailAgent
+
+6. **Execution**
+   - Orchestrate the workflow using async functions and `trace` context manager
+
+7. **Troubleshooting**
+   - Handle SSL errors with `certifi` and environment variable fixes
+   - Print and check results, review trace logs
+
+---
+
+## Technical Details
+
+### Environment and Package Setup
+- Uses `dotenv` for environment variables
+- Uses `sendgrid` for email delivery
+- Uses `pydantic` for structured outputs
+- Imports agentic framework: `Agent`, `Runner`, `trace`, `function_tool`, `WebSearchTool`
+
+### Agent Definitions
+- **PlannerAgent:**  
+  Plans web searches using structured output (`WebSearchPlan`)
+- **SearchAgent:**  
+  Performs web searches using `WebSearchTool`
+- **WriterAgent:**  
+  Synthesizes markdown report using structured output (`ReportData`)
+- **EmailAgent:**  
+  Formats and sends report via email
+
+### Tool Creation and Registration
+- **WebSearchTool:**  
+  Enables live web search for agents
+- **Function Tool:**  
+  Email sending function decorated with `@function_tool`
+
+### Workflow Execution
+- **Async Execution:**  
+  Uses `asyncio.gather` to parallelize web searches
+- **Traceability:**  
+  Uses `trace` context manager for logging and visualization
+
+### Error Handling
+- Handles SSL and API errors
+- Provides troubleshooting tips for SendGrid and WebSearchTool
+
+### Extensibility
+- Modular agent and tool design allows easy addition of new research, writing, or delivery agents
+- Structured outputs enable reliable data flow and downstream automation
+
+---
+
+## Key Code Patterns
+
+- **Pydantic Structured Output for Planning:**
+  ```python
+  class WebSearchItem(BaseModel):
+      reason: str = Field(description="Your reasoning for why this search is important to the query.")
+      query: str = Field(description="The search term to use for the web search.")
+
+  class WebSearchPlan(BaseModel):
+      searches: list[WebSearchItem] = Field(description="A list of web searches to perform to best answer the query.")
+
+  planner_agent = Agent(
+      name="PlannerAgent",
+      instructions=INSTRUCTIONS,
+      model="gpt-4o-mini",
+      output_type=WebSearchPlan,
+  )
+  ```
+
+- **Web Search Agent with Hosted Tool:**
+  ```python
+  search_agent = Agent(
+      name="Search agent",
+      instructions=INSTRUCTIONS,
+      tools=[WebSearchTool(search_context_size="low")],
+      model="gpt-4o-mini",
+      model_settings=ModelSettings(tool_choice="required"),
+  )
+  ```
+
+- **Async Workflow Functions:**
+  ```python
+  async def plan_searches(query: str):
+      result = await Runner.run(planner_agent, f"Query: {query}")
+      return result.final_output
+
+  async def perform_searches(search_plan: WebSearchPlan):
+      tasks = [asyncio.create_task(search(item)) for item in search_plan.searches]
+      results = await asyncio.gather(*tasks)
+      return results
+
+  async def search(item: WebSearchItem):
+      input = f"Search term: {item.query}\nReason for searching: {item.reason}"
+      result = await Runner.run(search_agent, input)
+      return result.final_output
+  ```
+
+- **Report Writing and Email Delivery:**
+  ```python
+  class ReportData(BaseModel):
+      short_summary: str = Field(description="A short 2-3 sentence summary of the findings.")
+      markdown_report: str = Field(description="The final report")
+      follow_up_questions: list[str] = Field(description="Suggested topics to research further")
+
+  writer_agent = Agent(
+      name="WriterAgent",
+      instructions=INSTRUCTIONS,
+      model="gpt-4o-mini",
+      output_type=ReportData,
+  )
+
+  @function_tool
+  def send_email(subject: str, html_body: str) -> Dict[str, str]:
+      ...
+  ```
+
+---
+
+## Deeper Details: Class Structures, Function Signatures, Framework Internals
+
+### Agent Class (Simplified)
+```python
+class Agent:
+    def __init__(self, name: str, instructions: str, model, tools: list = None, output_type=None, model_settings=None):
+        self.name = name
+        self.instructions = instructions
+        self.model = model
+        self.tools = tools or []
+        self.output_type = output_type
+        self.model_settings = model_settings
+
+    def as_tool(self, tool_name: str, tool_description: str):
+        ...
+```
+
+### Function Tool Decorator
+```python
+def function_tool(func):
+    # Registers a function as a tool with JSON schema
+    ...
+```
+
+### Runner Class (Simplified)
+```python
+class Runner:
+    @staticmethod
+    async def run(agent: Agent, input: str, context=None):
+        ...
+
+    @staticmethod
+    async def run_streamed(agent: Agent, input: str):
+        ...
+```
+
+### Example Function Signatures
+```python
+async def plan_searches(query: str) -> WebSearchPlan: ...
+async def perform_searches(search_plan: WebSearchPlan) -> list[str]: ...
+async def write_report(query: str, search_results: list[str]) -> ReportData: ...
+async def send_email(report: ReportData) -> dict: ...
+```
+
+---
+
+## Additional Notes
+
+### Commercial Implications
+- Deep research agentic workflows are broadly applicable to business, technical, and personal research tasks.
+- Enables scalable, automated reporting and knowledge synthesis.
+
+### Exercises
+- Try different queries and research domains.
+- Add more agents for post-processing or visualization.
+- Experiment with alternative search tools or report formats.
+
+### Troubleshooting Tips
+- Monitor API costs for WebSearchTool.
+- Check spam folder for missing emails.
+- Upgrade `certifi` and set `SSL_CERT_FILE` for SSL errors.
+- Review trace logs for debugging.
+
+### Extra Resources
+- OpenAI trace platform: https://platform.openai.com/traces
+- Pricing for WebSearchTool: https://platform.openai.com/docs/pricing#web-search
+
+---
+
+Let me know if you need even deeper details, such as full class implementations, advanced agentic framework internals, or more visual diagrams!
