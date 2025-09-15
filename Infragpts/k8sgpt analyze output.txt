@@ -1,0 +1,68 @@
+
+[root@router1 kapil]# kubectl exec -it k8sgpt-cli -n ollama -- /bin/bash
+k8sgpt-cli:/# k8sgpt analyze
+W0915 05:08:41.101369     332 warnings.go:70] v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+AI Provider: AI not used; --explain not set
+
+0: Deployment default/riva-api()
+- Error: Deployment default/riva-api has 1 replicas but 0 are available with status running
+
+1: Deployment default/triton0()
+- Error: Deployment default/triton0 has 1 replicas but 0 are available with status running
+
+2: Deployment k8sai/kubectl-ai()
+- Error: Deployment k8sai/kubectl-ai has 1 replicas but 0 are available with status running
+
+3: ConfigMap default/configmap-test()
+- Error: ConfigMap configmap-test is not used by any pods in the namespace
+
+4: ConfigMap default/kube-root-ca.crt()
+- Error: ConfigMap kube-root-ca.crt is not used by any pods in the namespace
+
+5: ConfigMap k8sai/kube-root-ca.crt()
+- Error: ConfigMap kube-root-ca.crt is not used by any pods in the namespace
+
+6: ConfigMap k8sgpt-operator-system/kube-root-ca.crt()
+- Error: ConfigMap kube-root-ca.crt is not used by any pods in the namespace
+
+7: ConfigMap kube-node-lease/kube-root-ca.crt()
+- Error: ConfigMap kube-root-ca.crt is not used by any pods in the namespace
+
+8: ConfigMap kube-public/kube-root-ca.crt()
+- Error: ConfigMap kube-root-ca.crt is not used by any pods in the namespace
+
+9: ConfigMap kube-system/chart-content-traefik()
+- Error: ConfigMap chart-content-traefik is empty
+
+10: ConfigMap kube-system/chart-content-traefik-crd()
+- Error: ConfigMap chart-content-traefik-crd is empty
+
+11: ConfigMap kube-system/cluster-dns()
+- Error: ConfigMap cluster-dns is not used by any pods in the namespace
+
+12: ConfigMap kube-system/extension-apiserver-authentication()
+- Error: ConfigMap extension-apiserver-authentication is not used by any pods in the namespace
+
+13: ConfigMap kube-system/kube-apiserver-legacy-service-account-token-tracking()
+- Error: ConfigMap kube-apiserver-legacy-service-account-token-tracking is not used by any pods in the namespace
+
+14: ConfigMap kube-system/kube-root-ca.crt()
+- Error: ConfigMap kube-root-ca.crt is not used by any pods in the namespace
+
+15: ConfigMap ollama/kube-root-ca.crt()
+- Error: ConfigMap kube-root-ca.crt is not used by any pods in the namespace
+
+16: Pod default/triton0-85578bc6ff-q59ll(Deployment/triton0)
+- Error: the last termination reason is Error container=riva-model-init pod=triton0-85578bc6ff-q59ll
+
+17: Pod k8sai/kubectl-ai-84cc69dcd6-shmvl(Deployment/kubectl-ai)
+- Error: Back-off pulling image "ghcr.io/googlecloudplatform/kubectl-ai:latest": ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack image "ghcr.io/googlecloudplatform/kubectl-ai:latest": failed to resolve reference "ghcr.io/googlecloudplatform/kubectl-ai:latest": ghcr.io/googlecloudplatform/kubectl-ai:latest: not found
+
+18: Service default/riva-api()
+- Error: Service has not ready endpoints, pods: [Pod/riva-api-6bfd4f7ccd-sl6ll], expected 1
+
+19: Service default/triton0()
+- Error: Service has not ready endpoints, pods: [Pod/triton0-85578bc6ff-q59ll], expected 1
+
+
+k8sgpt-cli:/#

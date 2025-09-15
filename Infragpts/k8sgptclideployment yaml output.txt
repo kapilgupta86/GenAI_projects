@@ -1,0 +1,141 @@
+[root@router1 kapil]# kubectl get pod k8sgpt-cli -n ollama -o yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: "2025-09-04T15:19:33Z"
+  generation: 1
+  name: k8sgpt-cli
+  namespace: ollama
+  resourceVersion: "875736"
+  uid: 3b5e7652-47db-4dc2-bd98-f1d4bd676f72
+spec:
+  containers:
+  - command:
+    - sleep
+    - infinity
+    image: alpine:3.20
+    imagePullPolicy: IfNotPresent
+    name: k8sgpt-cli
+    resources: {}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /home/nonroot/.config/k8sgpt
+      name: k8sgpt-config
+      readOnly: true
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-s5hkb
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  nodeName: router1
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccount: k8sgpt-sa
+  serviceAccountName: k8sgpt-sa
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - name: k8sgpt-config
+    secret:
+      defaultMode: 420
+      secretName: k8sgpt-auth
+  - name: kube-api-access-s5hkb
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2025-09-04T15:19:55Z"
+    status: "True"
+    type: PodReadyToStartContainers
+  - lastProbeTime: null
+    lastTransitionTime: "2025-09-04T15:19:33Z"
+    status: "True"
+    type: Initialized
+  - lastProbeTime: null
+    lastTransitionTime: "2025-09-04T15:21:21Z"
+    status: "True"
+    type: Ready
+  - lastProbeTime: null
+    lastTransitionTime: "2025-09-04T15:21:21Z"
+    status: "True"
+    type: ContainersReady
+  - lastProbeTime: null
+    lastTransitionTime: "2025-09-04T15:19:33Z"
+    status: "True"
+    type: PodScheduled
+  containerStatuses:
+  - containerID: containerd://05f804abdc18a706ec02542e4b7a20a09ecf7d1de6e87c1d95982fbae31b3eec
+    image: docker.io/library/alpine:3.20
+    imageID: docker.io/library/alpine@sha256:b3119ef930faabb6b7b976780c0c7a9c1aa24d0c75e9179ac10e6bc9ac080d0d
+    lastState: {}
+    name: k8sgpt-cli
+    ready: true
+    resources: {}
+    restartCount: 0
+    started: true
+    state:
+      running:
+        startedAt: "2025-09-04T15:21:21Z"
+    user:
+      linux:
+        gid: 0
+        supplementalGroups:
+        - 0
+        - 1
+        - 2
+        - 3
+        - 4
+        - 6
+        - 10
+        - 11
+        - 20
+        - 26
+        - 27
+        uid: 0
+    volumeMounts:
+    - mountPath: /home/nonroot/.config/k8sgpt
+      name: k8sgpt-config
+      readOnly: true
+      recursiveReadOnly: Disabled
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-s5hkb
+      readOnly: true
+      recursiveReadOnly: Disabled
+  hostIP: 172.27.70.60
+  hostIPs:
+  - ip: 172.27.70.60
+  phase: Running
+  podIP: 10.42.0.69
+  podIPs:
+  - ip: 10.42.0.69
+  qosClass: BestEffort
+  startTime: "2025-09-04T15:19:33Z"
+[root@router1 kapil]#

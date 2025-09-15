@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k8sgpt-cli-job
+  namespace: ollama
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      serviceAccountName: k8sgpt-sa
+      restartPolicy: Never
+      containers:
+        - name: k8sgpt-cli
+          image: ghcr.io/k8sgpt-ai/k8sgpt:latest
+          args:
+            - analyze
+            - --explain
+            - --backend
+            - openai
+          env:
+            - name: K8SGPT_CONFIG
+              value: /home/nonroot/.config/k8sgpt/k8sgpt.yaml
+          volumeMounts:
+            - name: k8sgpt-config
+              mountPath: /home/nonroot/.config/k8sgpt
+              readOnly: true
+      volumes:
+        - name: k8sgpt-config
+          secret:
+            secretName: k8sgpt-auth
+

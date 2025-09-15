@@ -1,0 +1,24 @@
+error: unknown command "exec-it" for "kubectl"
+[root@router1 k8sgpt]# kubectl exec -it k8sgpt-cli -n ollama -- /bin/bash
+k8sgpt-cli:/# pwd
+/
+k8sgpt-cli:/# cd /home/nonroot/.config/k8sgpt/
+k8sgpt-cli:/home/nonroot/.config/k8sgpt# ls
+k8sgpt.yaml
+k8sgpt-cli:/home/nonroot/.config/k8sgpt# cat k8sgpt.yaml
+ai:
+    providers:
+        - name: openai
+          backend: openai
+          model: mistral
+          baseurl: http://ollama-service.ollama.svc.cluster.local:11434/v1
+          password: dummy
+          temperature: 0.7
+          customheaders: []
+    defaultprovider: openai
+commit: a75ec50
+date: unknown
+kubeconfig: ""
+kubecontext: ""
+version: 0.4.2
+k8sgpt-cli:/home/nonroot/.config/k8sgpt#
