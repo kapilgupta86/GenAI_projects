@@ -1,0 +1,295 @@
+# src/knowledge_bot/main.py
+import os
+import json
+import socket
+import gradio as gr
+from dotenv import load_dotenv
+from knowledge_bot.crew import KnowledgeBotCrew
+
+load_dotenv()
+
+# Default knowledge directory - consistent across all components
+DEFAULT_KNOWLEDGE_DIR = "./knowledge"
+
+def find_free_port(start_port=7861):
+    """Find an available port starting from the given port."""
+    for port in range(start_port, start_port + 10):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('0.0.0.0', port))
+                return port
+            except OSError:
+                continue
+    return 7870  # fallback port
+
+# -----------------------------
+# Google Drive helpers for UI
+# -----------------------------
+def _drive_connect_and_list_root():
+    """Connect to Google Drive and list root folders."""
+    try:
+        from pydrive2.auth import GoogleAuth
+        from pydrive2.drive import GoogleDrive
+        gauth = GoogleAuth()
+        gauth.LocalWebserverAuth()
+        drive = GoogleDrive(gauth)
+        file_list = drive.ListFile({'q': "'root' in parents and trashed=false"}).GetList()
+        choices = []
+        for f in file_list:
+            mt = f.get('mimeType', '')
+            if 'folder' in mt:
+                name = f.get('title') or f.get('name')
+                fid = f['id']
+                if name and fid:
+                    choices.append(f"{name}::{fid}")
+        if not choices:
+            choices = ["<no folders found in root>"]
+        return gr.update(choices=choices, value=None), "Drive connected. Select a folder from the dropdown."
+    except Exception as e:
+        return gr.update(choices=[]), f"Drive error: {e}"
+
+# -----------------------------
+# Crew kickoff pipeline
+# -----------------------------
+def kickoff_pipeline(
+    query,
+    folder_path,
+    github_url,
+    model,
+    save_markdown,
+    embed_model,
+    use_drive,
+    drive_folder_choice,
+    top_k,
+    knowledge_dir,
+    profile_name,
+    answer_sink_path,
+    answer_max_tokens,
+    continue_segments,
+    num_ctx,
+):
+    """Execute the crew pipeline with provided inputs."""
+    # Set KNOWLEDGE_DIR before crew creation so knowledge sources reload correctly
+    knowledge_path = (knowledge_dir or DEFAULT_KNOWLEDGE_DIR).strip()
+    if knowledge_path:
+        os.environ["KNOWLEDGE_DIR"] = os.path.abspath(knowledge_path)
+    
+    # Parse selected drive folder id if provided
+    drive_folder_id = None
+    if use_drive and drive_folder_choice and "::" in drive_folder_choice:
+        drive_folder_id = drive_folder_choice.split("::")[-1]
+    
+    # Create crew instance
+    kb = KnowledgeBotCrew()
+    
+    # Prepare inputs dictionary - consistent folder handling
+    inputs = {
+        "query": query or "",
+        "folder_path": folder_path or os.path.abspath(knowledge_path),  # Use knowledge_dir as default
+        "github_url": github_url or "",
+        "model": model or "mistral",
+        "embed_model": embed_model or "mistral",
+        "save_markdown": save_markdown if save_markdown else None,
+        "use_drive": bool(use_drive),
+        "drive_folder_id": drive_folder_id,
+        "top_k": int(top_k or 5),
+        # Extended controls for advanced functionality
+        "profile_name": (profile_name or "").strip(),
+        "answer_sink_path": (answer_sink_path or "").strip() or None,
+        "answer_max_tokens": int(answer_max_tokens or 2048),
+        "continue_segments": int(continue_segments or 0),
+        "num_ctx": int(num_ctx or 8192),
+    }
+    
+    try:
+        result = kb.crew().kickoff(inputs=inputs)
+        
+        # Extract final output from crew result
+        final = getattr(result, "final_output", None)
+        if not final:
+            outs = getattr(result, "tasks_output", [])
+            last_item = outs[-1] if outs else None
+            final = getattr(last_item, "raw", last_item)
+            
+        # Extract answer from final result
+        if isinstance(final, dict):
+            answer = final.get("answer", str(final))
+        else:
+            answer = str(final)
+            
+        return answer
+        
+    except Exception as e:
+        return f"Error during crew execution: {e}"
+
+# -----------------------------
+# Gradio UI Interface
+# -----------------------------
+with gr.Blocks(title="KnowledgeBot - Enhanced AI Assistant") as demo:
+    gr.Markdown("## KnowledgeBot - Enhanced AI Assistant")
+    gr.Markdown("Ask questions about your documents, list files/projects, or get personalized responses.")
+    
+    # Main query input
+    query = gr.Textbox(
+        label="Your Question", 
+        placeholder="Ask a question, list files/projects, or request summaries...",
+        lines=2
+    )
+    
+    # File sources section
+    with gr.Row():
+        folder = gr.Textbox(
+            label="Folder path", 
+            value="",
+            placeholder="Leave empty to use Knowledge directory"
+        )
+        github = gr.Textbox(
+            label="GitHub repo URL (optional)", 
+            placeholder="https://github.com/user/repo"
+        )
+    
+    # Model configuration
+    with gr.Row():
+        model = gr.Dropdown(
+            choices=["mistral", "llama3.2", "llama3.2:1b", "llama2", "gemma"], 
+            value="mistral", 
+            label="Chat model"
+        )
+        embed_model = gr.Dropdown(
+            choices=["mistral", "nomic-embed-text", "mxbai-embed-large"], 
+            value="mistral", 
+            label="Embedding model"
+        )
+        top_k = gr.Slider(1, 20, value=5, step=1, label="Retrieval count (top-k)")
+    
+    # Knowledge base and profile configuration
+    with gr.Row():
+        knowledge_dir = gr.Textbox(
+            label="Knowledge directory", 
+            value=DEFAULT_KNOWLEDGE_DIR,
+            placeholder="Path to your knowledge base folder"
+        )
+        profile_name = gr.Textbox(
+            label="Your name (optional)", 
+            placeholder="Used for personalized responses"
+        )
+    
+    # Google Drive integration
+    with gr.Row():
+        use_drive = gr.Checkbox(label="Use Google Drive", value=False)
+        drive_folder = gr.Dropdown(
+            label="Drive Folder (select after connect)", 
+            choices=[],
+            interactive=True
+        )
+    
+    with gr.Row():
+        drive_btn = gr.Button("Connect & List Root Folders")
+        drive_status = gr.Textbox(label="Drive status", interactive=False)
+        drive_btn.click(
+            fn=_drive_connect_and_list_root, 
+            inputs=None, 
+            outputs=[drive_folder, drive_status]
+        )
+    
+    # Advanced output controls
+    gr.Markdown("### Advanced Output Controls")
+    answer_sink_path = gr.Textbox(
+        label="Save extended answers to file (optional)", 
+        placeholder="./long_answer.md"
+    )
+    
+    with gr.Row():
+        answer_max_tokens = gr.Slider(
+            256, 4096, value=2048, step=256, 
+            label="Max tokens per response chunk"
+        )
+        continue_segments = gr.Slider(
+            0, 20, value=0, step=1, 
+            label="Continuation segments for very long answers"
+        )
+        num_ctx = gr.Slider(
+            2048, 32768, value=8192, step=1024, 
+            label="Model context window (num_ctx)"
+        )
+    
+    # Output file saving
+    save_md = gr.Textbox(
+        label="Also save response to markdown file (optional)", 
+        placeholder="./response.md"
+    )
+    
+    # Execute button and output
+    run_btn = gr.Button("🚀 Run Query", variant="primary", size="lg")
+    output = gr.Textbox(
+        label="AI Response", 
+        lines=15, 
+        max_lines=30,
+        show_copy_button=True
+    )
+    
+    # Wire up the interface
+    run_btn.click(
+        kickoff_pipeline,
+        inputs=[
+            query, folder, github, model, save_md, embed_model, 
+            use_drive, drive_folder, top_k, knowledge_dir, profile_name, 
+            answer_sink_path, answer_max_tokens, continue_segments, num_ctx
+        ],
+        outputs=output
+    )
+
+# -----------------------------
+# CLI entry point for `crewai run`
+# -----------------------------
+def run():
+    """CLI entry point for crew execution."""
+    # Set up environment for CLI usage
+    knowledge_path = os.getenv("KNOWLEDGE_DIR", DEFAULT_KNOWLEDGE_DIR)
+    os.environ["KNOWLEDGE_DIR"] = os.path.abspath(knowledge_path)
+    
+    kb = KnowledgeBotCrew()
+    
+    try:
+        # Gather inputs from environment variables
+        inputs = {
+            "query": os.getenv("KB_QUERY", ""),
+            "folder_path": os.getenv("KB_FOLDER_PATH", os.path.abspath(knowledge_path)),
+            "github_url": os.getenv("KB_GITHUB_URL", ""),
+            "model": os.getenv("KB_MODEL", "mistral"),
+            "embed_model": os.getenv("KB_EMBED_MODEL", "mistral"),
+            "save_markdown": os.getenv("KB_SAVE_MD") or None,
+            "use_drive": os.getenv("KB_USE_DRIVE", "false").lower() == "true",
+            "drive_folder_id": os.getenv("KB_DRIVE_FOLDER_ID") or None,
+            "top_k": int(os.getenv("KB_TOP_K", "5")),
+            # Extended CLI controls
+            "profile_name": os.getenv("KB_PROFILE_NAME", "").strip(),
+            "answer_sink_path": (os.getenv("KB_ANSWER_SINK_PATH", "").strip() or None),
+            "answer_max_tokens": int(os.getenv("KB_ANSWER_MAX_TOKENS", "2048")),
+            "continue_segments": int(os.getenv("KB_CONTINUE_SEGMENTS", "0")),
+            "num_ctx": int(os.getenv("KB_NUM_CTX", "8192")),
+        }
+        
+        result = kb.crew().kickoff(inputs=inputs)
+        
+        # Extract and print final result
+        final = getattr(result, "final_output", None)
+        if not final:
+            outs = getattr(result, "tasks_output", [])
+            last_item = outs[-1] if outs else None
+            final = getattr(last_item, "raw", last_item)
+            
+        if isinstance(final, dict) and "answer" in final:
+            print(final["answer"])
+        else:
+            print(final)
+            
+    except Exception as e:
+        print(f"Error during crew execution: {e}")
+
+if __name__ == "__main__":
+    # Launch UI with flexible port handling
+    port = find_free_port()
+    print(f"Starting KnowledgeBot on port {port}")
+    demo.launch(server_name="0.0.0.0", server_port=port)
+

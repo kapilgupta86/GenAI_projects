@@ -1,0 +1,871 @@
+# src/knowledge_bot/crew.py
+from typing import Any, Dict, List, Tuple
+import hashlib
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+import requests
+import chromadb
+from dotenv import load_dotenv
+from crewai import Agent, Crew, Process, Task
+from crewai.project import CrewBase, agent, crew, task
+
+# Optional: CrewAI Knowledge (generic KB folder ingestion)
+try:
+    from crewai.knowledge.source.pdf_knowledge_source import PDFKnowledgeSource
+    from crewai.knowledge.source.string_knowledge_source import StringKnowledgeSource
+    HAS_KNOWLEDGE_SOURCES = True
+except Exception:
+    PDFKnowledgeSource = None
+    StringKnowledgeSource = None
+    HAS_KNOWLEDGE_SOURCES = False
+
+# Project-local tools/agents
+from .tools.custom_tool import LocalFileReader, GitHubRepoCloner, GoogleDriveReader
+from .agents.file_agent import build_file_agent
+from .agents.github_agent import build_github_agent
+from .agents.drive_agent import build_drive_agent
+from .agents.embed_agent import build_embed_agent
+from .agents.query_agent import build_query_agent
+
+load_dotenv()
+
+# Configuration paths
+BASE_DIR = Path(__file__).resolve().parent
+AGENTS_YAML = (BASE_DIR / "config" / "agents.yaml").as_posix()
+TASKS_YAML = (BASE_DIR / "config" / "tasks.yaml").as_posix()
+
+# Default Ollama configuration (in-cluster)
+DEFAULT_OLLAMA_BASE = "http://ollama-service.ollama.svc.cluster.local:11434"
+DEFAULT_KNOWLEDGE_DIR = "./knowledge"
+
+# ---- AI/ML Project Detection Heuristics ----
+AI_LIB_KEYWORDS = {
+    "torch", "pytorch", "tensorflow", "tf", "keras", "jax", "flax", "onnx", "onnxruntime",
+    "transformers", "diffusers", "sentence-transformers", "spacy", "opencv-python",
+    "scikit-learn", "sklearn", "xgboost", "lightgbm", "catboost", "openvino"
+}
+AI_FILE_HINTS = {".pt", ".onnx", ".tflite", ".pb"}
+AI_NAME_HINTS = {"train.py", "infer.py", "inference.py", "serve.py", "model.py"}
+
+# ---- Generic Project Detection ----
+PROJECT_HINT_FILES = {
+    "pyproject.toml", "requirements.txt", "setup.py", "Pipfile", "poetry.lock",
+    "package.json", "go.mod", "Cargo.toml", "Makefile", "Dockerfile", "README.md", ".git"
+}
+
+# Directory exclusion patterns
+EXCLUDE_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "env", ".mypy_cache", ".pytest_cache"}
+
+# ---- Utility Functions ----
+
+def _read_text_safe(path: str, max_bytes: int = 200_000) -> str:
+    """Safely read text file with size limit and encoding fallback."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read(max_bytes)
+    except Exception:
+        return ""
+
+def _looks_like_ai_project(dir_path: str) -> bool:
+    """Detect if directory contains AI/ML project indicators."""
+    try:
+        for name in os.listdir(dir_path):
+            lower = name.lower()
+            full = os.path.join(dir_path, name)
+            
+            # Check for AI-specific file extensions
+            if any(lower.endswith(ext) for ext in AI_FILE_HINTS):
+                return True
+                
+            # Check for AI-specific filenames
+            if lower in AI_NAME_HINTS:
+                return True
+                
+            # Check package files for AI libraries
+            if lower in {"requirements.txt", "environment.yml", "environment.yaml", "pyproject.toml", "pyproject.yaml"}:
+                txt = _read_text_safe(full)
+                for kw in AI_LIB_KEYWORDS:
+                    if kw in txt.lower():
+                        return True
+                        
+            # Check Python files for AI imports
+            if lower.endswith(".ipynb") or lower.endswith(".py"):
+                head = _read_text_safe(full, max_bytes=40_000).lower()
+                for kw in AI_LIB_KEYWORDS:
+                    if f"import {kw}" in head or f"from {kw} import" in head:
+                        return True
+    except Exception:
+        pass
+    return False
+
+def _looks_like_project(dir_path: str) -> bool:
+    """Detect if directory contains general project indicators."""
+    try:
+        names = set(os.listdir(dir_path))
+        
+        # Common project indicators
+        if ".git" in names or "README.md" in names or "Dockerfile" in names or "Makefile" in names:
+            return True
+            
+        # Project configuration files
+        if any(f in names for f in PROJECT_HINT_FILES):
+            return True
+            
+        # IDE/platform specific files
+        for n in names:
+            ln = n.lower()
+            if ln.endswith(".sln") or ln.endswith(".csproj") or ln.endswith(".xcodeproj"):
+                return True
+        return False
+    except Exception:
+        return False
+
+def _list_ai_projects(base_path: str, max_depth: int = 3) -> List[str]:
+    """Find directories that appear to be AI/ML projects."""
+    base = os.path.abspath(base_path)
+    out: List[str] = []
+    
+    for root, dirs, _ in os.walk(base):
+        rel = os.path.relpath(root, base)
+        depth = 0 if rel == "." else rel.count(os.sep) + 1
+        
+        # Filter directories and control depth
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith(".")]
+        if depth > max_depth:
+            dirs[:] = []
+            continue
+            
+        # Check if current directory is an AI project
+        if _looks_like_ai_project(root):
+            out.append(root)
+            dirs[:] = []  # Don't descend into detected projects
+            
+    return sorted(set(out))
+
+def _list_projects_generic(base_path: str, max_depth: int = 3) -> List[str]:
+    """Find directories that appear to be any kind of project."""
+    base = os.path.abspath(base_path)
+    out: List[str] = []
+    
+    for root, dirs, _ in os.walk(base):
+        rel = os.path.relpath(root, base)
+        depth = 0 if rel == "." else rel.count(os.sep) + 1
+        
+        # Filter directories and control depth
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith(".")]
+        if depth > max_depth:
+            dirs[:] = []
+            continue
+            
+        # Check if current directory is any kind of project
+        if _looks_like_project(root) or _looks_like_ai_project(root):
+            out.append(root)
+            dirs[:] = []  # Don't descend into detected projects
+            
+    return sorted(set(out))
+
+def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> List[str]:
+    """Split text into overlapping chunks for embedding."""
+    if not text:
+        return []
+    if chunk_size <= 0:
+        chunk_size = 800
+    if overlap < 0 or overlap >= chunk_size:
+        overlap = max(0, min(100, chunk_size // 4))
+        
+    out: List[str] = []
+    n = len(text)
+    start = 0
+    
+    while start < n:
+        end = min(n, start + chunk_size)
+        out.append(text[start:end])
+        if end >= n:
+            break
+        start = max(0, end - overlap)
+        
+    return out
+
+def _doc_id(s: str) -> str:
+    """Generate unique document ID from string content."""
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+def _ollama_embed_batch(base_url: str, model: str, texts: List[str]) -> List[List[float]]:
+    """Generate embeddings using Ollama with fallback handling."""
+    if not texts:
+        return []
+        
+    # Try batch embedding first
+    try:
+        resp = requests.post(f"{base_url}/api/embed", json={"model": model, "input": texts}, timeout=600)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict) and "embeddings" in data:
+                return data["embeddings"]
+            if isinstance(data, dict) and "data" in data:
+                return [item.get("embedding", []) for item in data.get("data", [])]
+            if isinstance(data, dict) and "embedding" in data:
+                return [data["embedding"]] * len(texts)
+    except Exception:
+        pass
+    
+    # Fallback to individual requests
+    out: List[List[float]] = []
+    for t in texts:
+        try:
+            r = requests.post(f"{base_url}/api/embeddings", json={"model": model, "prompt": t}, timeout=180)
+            r.raise_for_status()
+            jd = r.json()
+            out.append(jd.get("embedding", []))
+        except Exception:
+            out.append([])  # Empty embedding for failed requests
+    return out
+
+@dataclass
+class RAGStore:
+    """Wrapper for ChromaDB persistent client."""
+    client: chromadb.PersistentClient
+    collection_name: str
+    
+    def get_or_create(self):
+        return self.client.get_or_create_collection(self.collection_name)
+
+def _load_knowledge_sources(knowledge_dir: str) -> List[Any]:
+    """
+    Load PDF and text/markdown files from knowledge_dir as CrewAI knowledge sources.
+    PDF paths are made relative to the base directory to avoid path conflicts.
+    """
+    sources: List[Any] = []
+    if not knowledge_dir or not HAS_KNOWLEDGE_SOURCES:
+        return sources
+        
+    base = os.path.abspath(knowledge_dir)
+    if not os.path.isdir(base):
+        return sources
+
+    pdf_relpaths: List[str] = []
+    texts: List[str] = []
+
+    # Walk directory tree and collect files
+    for root, _, files in os.walk(base):
+        for name in files:
+            full = os.path.join(root, name)
+            ln = name.lower()
+            
+            if ln.endswith(".pdf"):
+                # Use relative path to avoid CrewAI path conflicts
+                rel = os.path.relpath(full, base)
+                pdf_relpaths.append(rel)
+            elif ln.endswith(".txt") or ln.endswith(".md"):
+                try:
+                    with open(full, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read(400_000)  # Limit size per file
+                        if content.strip():
+                            texts.append(content)
+                except Exception:
+                    pass
+
+    # Create knowledge sources
+    if PDFKnowledgeSource and pdf_relpaths:
+        sources.append(PDFKnowledgeSource(file_paths=pdf_relpaths))
+    if StringKnowledgeSource and texts:
+        sources.append(StringKnowledgeSource(content="\n\n---\n\n".join(texts)))
+
+    return sources
+
+@CrewBase
+class KnowledgeBotCrew:
+    """
+    Enhanced Knowledge Bot crew with deterministic routing, multi-format file support,
+    and comprehensive RAG capabilities.
+    """
+    
+    agents_config = AGENTS_YAML
+    tasks_config = TASKS_YAML
+
+    def __init__(self):
+        self.persist_dir = os.path.abspath("./kb_chroma")
+        os.makedirs(self.persist_dir, exist_ok=True)
+        self.chroma = chromadb.PersistentClient(path=self.persist_dir)
+        self.collection_name = "knowledgebot_collection"
+        self.rag_store = RAGStore(client=self.chroma, collection_name=self.collection_name)
+
+    @agent
+    def file_agent(self) -> Agent:
+        return build_file_agent(self.agents_config["file_agent"])  # type: ignore[index]
+
+    @agent
+    def github_agent(self) -> Agent:
+        return build_github_agent(self.agents_config["github_agent"])  # type: ignore[index]
+
+    @agent
+    def drive_agent(self) -> Agent:
+        return build_drive_agent(self.agents_config["drive_agent"])  # type: ignore[index]
+
+    @agent
+    def embed_agent(self) -> Agent:
+        return build_embed_agent(self.agents_config["embed_agent"])  # type: ignore[index]
+
+    @agent
+    def query_agent(self) -> Agent:
+        return build_query_agent(self.agents_config["query_agent"])  # type: ignore[index]
+
+    @task
+    def ingest_task(self) -> Task:
+        """Task to ingest documents from various sources into the knowledge base."""
+        def run(inputs: Dict[str, Any]) -> Dict[str, Any]:
+            # Use knowledge directory as default for consistency
+            folder = inputs.get("folder_path") or os.path.abspath(DEFAULT_KNOWLEDGE_DIR)
+            gh_url = inputs.get("github_url") or ""
+            use_drive = bool(inputs.get("use_drive"))
+            drive_folder_id = inputs.get("drive_folder_id") or None
+
+            # Collect documents from all sources
+            local_docs = LocalFileReader(folder)
+            _, gh_docs = GitHubRepoCloner(gh_url) if gh_url else ("", [])
+            drive_docs = GoogleDriveReader(drive_folder_id) if use_drive else []
+
+            # Normalize metadata across sources
+            all_docs: List[Dict[str, Any]] = []
+            for d in (local_docs + gh_docs + drive_docs):
+                meta = d.get("metadata", {})
+                if "source" not in meta:
+                    meta["source"] = d.get("path") or meta.get("path") or meta.get("name") or "unknown"
+                if d.get("content"):
+                    d["metadata"] = meta
+                    all_docs.append(d)
+
+            return {"documents": all_docs, "count": len(all_docs)}
+            
+        return Task(config=self.tasks_config["ingest_task"], agent=self.file_agent(), function=run)  # type: ignore[index]
+
+    @task
+    def embed_task(self) -> Task:
+        """Task to chunk and embed documents using Ollama."""
+        def run(inputs: Dict[str, Any]) -> Dict[str, Any]:
+            documents = inputs.get("documents", [])
+            if not documents:
+                return {"embedded": 0, "collection": self.collection_name}
+                
+            base_url = os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE)
+            embed_model = inputs.get("embed_model") or "mistral"
+            
+            collection = self.rag_store.get_or_create()
+            ids: List[str] = []
+            metadatas: List[Dict[str, Any]] = []
+            texts: List[str] = []
+            
+            # Chunk each document
+            for d in documents:
+                meta = d.get("metadata", {})
+                src = meta.get("source") or d.get("path") or "unknown"
+                meta["source"] = src
+                
+                for idx, ch in enumerate(_chunk_text(d["content"], 800, 100)):
+                    uid = _doc_id(f"{src}::{idx}::{ch[:64]}")
+                    ids.append(uid)
+                    metadatas.append(meta.copy())  # Copy to avoid reference issues
+                    texts.append(ch)
+            
+            if not texts:
+                return {"embedded": 0, "collection": self.collection_name}
+            
+            # Generate embeddings and store
+            vectors = _ollama_embed_batch(base_url, embed_model, texts)
+            collection.upsert(ids=ids, embeddings=vectors, metadatas=metadatas, documents=texts)
+            
+            return {"embedded": len(ids), "collection": self.collection_name}
+            
+        return Task(config=self.tasks_config["embed_task"], agent=self.embed_agent(), function=run)  # type: ignore[index]
+
+    @task
+    def query_task(self) -> Task:
+        """Enhanced query task with intent routing and deterministic responses."""
+        
+        def _rerank_with_keywords(contexts: List[str], distances: List[float], query: str, alpha: float = 0.7) -> List[int]:
+            """Rerank search results using semantic similarity + keyword overlap."""
+            if not distances:
+                distances = [1.0] * len(contexts)
+                
+            # Convert distances to similarities
+            sims = []
+            for d in distances:
+                try:
+                    sims.append(max(0.0, min(1.0, 1.0 / (1.0 + float(d)))))
+                except Exception:
+                    sims.append(0.0)
+            
+            # Calculate keyword overlap scores
+            qtoks = set(re.findall(r"\w+", query.lower()))
+            kws = []
+            for c in contexts:
+                ct = set(re.findall(r"\w+", (c or "").lower()))
+                kws.append(len(qtoks & ct) / (len(qtoks) + 1e-6))
+            
+            # Combine scores and rank
+            scores = [(alpha * sims[i] + (1 - alpha) * kws[i], i) for i in range(len(contexts))]
+            scores.sort(key=lambda x: x[0], reverse=True)
+            return [i for _, i in scores]
+
+        def _detect_intent(q: str) -> str:
+            """Classify query intent for routing to appropriate handler."""
+            ql = q.lower().strip()
+            
+            if "list" in ql and (".py" in ql or ".md" in ql):
+                return "list_files"
+            if any(x in ql for x in ["ai project", "ml project", "machine learning", "deep learning"]):
+                return "list_projects_ai"
+            if ("project" in ql or "projects" in ql) and any(y in ql for y in ["folder", "path", "directory", "dir", "under", "in "]):
+                return "list_projects_generic"
+            if any(x in ql for x in ["summarize", "summary", "summarise"]) and any(y in ql for y in ["pdf", ".pdf", "folder", "path"]):
+                return "summarize_folder"
+            if any(x in ql for x in ["what is my name", "who am i", "tell me my name"]):
+                return "personal_info"
+            return "generic_rag"
+
+        def _append_to_file(path: str, text: str) -> None:
+            """Safely append text to file with directory creation."""
+            if not path or not text:
+                return
+            p = os.path.abspath(path)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(text)
+
+        def _preview(text: str, limit: int = 4000) -> str:
+            """Create truncated preview of long text."""
+            t = (text or "").strip()
+            return t if len(t) <= limit else t[:limit] + "\n... [truncated - full content saved to file]\n"
+
+        def run(inputs: Dict[str, Any]) -> Dict[str, Any]:
+            """Main query processing function with intent routing."""
+            question = inputs.get("query") or ""
+            if not question.strip():
+                return {"answer": "Please provide a query.", "sources": []}
+
+            # Configuration
+            base_url = os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE)
+            embed_model = inputs.get("embed_model") or "mistral"
+            top_k = max(1, int(inputs.get("top_k") or 5))
+            model = inputs.get("model") or "mistral"
+            save_md = inputs.get("save_markdown")
+            folder_default = inputs.get("folder_path") or os.path.abspath(DEFAULT_KNOWLEDGE_DIR)
+
+            # Long-output controls
+            answer_sink_path = inputs.get("answer_sink_path")
+            answer_max_tokens = int(inputs.get("answer_max_tokens") or 2048)
+            num_ctx = int(inputs.get("num_ctx") or 8192)
+            continue_segments = int(inputs.get("continue_segments") or 0)
+
+            # Route query based on intent
+            intent = _detect_intent(question)
+            try:
+                print(f"[KnowledgeBot] intent={intent} question='{question[:120]}'")
+            except Exception:
+                pass
+
+            # DETERMINISTIC HANDLERS
+
+            # 1) List .py and .md files
+            if intent == "list_files":
+                base_path = folder_default
+                m = re.search(r"\{([^}]+)\}", question)
+                if m and m.group(1).strip():
+                    base_path = m.group(1).strip()
+                    
+                matches: List[str] = []
+                try:
+                    for root_dir, _, files in os.walk(base_path):
+                        for name in files:
+                            if name.endswith(".py") or name.endswith(".md"):
+                                matches.append(os.path.join(root_dir, name))
+                except Exception:
+                    pass
+                    
+                matches.sort()
+                plain = "\n".join(matches) if matches else f"No .py or .md files found in {base_path}"
+                
+                if save_md:
+                    try:
+                        outp = os.path.abspath(save_md if isinstance(save_md, str) else "./knowledgebot_answer.md")
+                        with open(outp, "w", encoding="utf-8") as f:
+                            f.write(plain)
+                    except Exception:
+                        pass
+                        
+                return {"answer": plain, "sources": [{"intent": "list_files", "base_path": base_path, "count": len(matches)}]}
+
+            # 2) List AI/ML projects
+            if intent == "list_projects_ai":
+                base_path = folder_default
+                m = re.search(r"\{([^}]+)\}", question)
+                if m and m.group(1).strip():
+                    base_path = m.group(1).strip()
+                    
+                projects = _list_ai_projects(base_path, 3)
+                plain = "\n".join(projects) if projects else "No AI/ML projects found."
+                
+                if save_md:
+                    try:
+                        outp = os.path.abspath(save_md if isinstance(save_md, str) else "./knowledgebot_answer.md")
+                        with open(outp, "w", encoding="utf-8") as f:
+                            f.write(plain)
+                    except Exception:
+                        pass
+                        
+                return {"answer": plain, "sources": [{"intent": "list_projects_ai", "base_path": base_path, "count": len(projects)}]}
+
+            # 3) List generic projects
+            if intent == "list_projects_generic":
+                base_path = folder_default
+                m = re.search(r"\{([^}]+)\}", question)
+                if m and m.group(1).strip():
+                    base_path = m.group(1).strip()
+                    
+                projects = _list_projects_generic(base_path, 3)
+                plain = "\n".join(projects) if projects else "No projects found."
+                
+                if save_md:
+                    try:
+                        outp = os.path.abspath(save_md if isinstance(save_md, str) else "./knowledgebot_answer.md")
+                        with open(outp, "w", encoding="utf-8") as f:
+                            f.write(plain)
+                    except Exception:
+                        pass
+                        
+                return {"answer": plain, "sources": [{"intent": "list_projects_generic", "base_path": base_path, "count": len(projects)}]}
+
+            # 4) Personal info lookup
+            if intent == "personal_info":
+                name = os.getenv("KB_USER_NAME")
+                if not name:
+                    name = (inputs.get("profile_name") or "").strip()
+                if not name:
+                    try:
+                        profile_file = inputs.get("profile_file") or "./knowledge/user_preference.txt"
+                        p = os.path.abspath(profile_file)
+                        if os.path.exists(p):
+                            with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                                for line in f:
+                                    if line.lower().startswith("name:"):
+                                        name = line.split(":", 1)[1].strip()
+                                        if name:
+                                            break
+                    except Exception:
+                        pass
+                        
+                if not name:
+                    return {
+                        "answer": "Name not found. Set KB_USER_NAME environment variable, provide profile_name in UI, or add 'name: <value>' to ./knowledge/user_preference.txt.",
+                        "sources": [{"intent": "personal_info", "method": "not_found"}]
+                    }
+                    
+                return {"answer": name, "sources": [{"intent": "personal_info", "source": "resolved"}]}
+
+            # 5) PDF folder summarization (map-reduce)
+            if intent == "summarize_folder":
+                base_path = folder_default
+                m = re.search(r"\{([^}]+)\}", question)
+                if m and m.group(1).strip():
+                    base_path = m.group(1).strip()
+
+                # Find PDFs
+                pdfs: List[str] = []
+                try:
+                    for root, dirs, files in os.walk(base_path):
+                        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith(".")]
+                        for n in files:
+                            if n.lower().endswith(".pdf"):
+                                pdfs.append(os.path.join(root, n))
+                except Exception:
+                    pass
+                pdfs.sort()
+
+                if not pdfs:
+                    return {"answer": f"No PDF files found in {base_path}", "sources": [{"intent": "summarize_folder", "base_path": base_path}]}
+
+                collection = self.rag_store.get_or_create()
+                per_doc: List[Tuple[str, str]] = []
+                system_map = "You write concise factual summaries of single documents; avoid speculation; 6-8 bullet points max."
+                
+                # Summarize individual PDFs
+                for pth in pdfs[:25]:  # Limit to prevent overwhelming
+                    try:
+                        got = collection.get(where={"source": {"$eq": pth}}, include=["documents", "metadatas"])
+                        docs = got.get("documents") or []
+                        if not docs:
+                            continue
+                            
+                        context = "\n".join(docs[:8])
+                        prompt_map = f"Document path: {pth}\n\nSummarize this document succinctly:\n\n{context}\n"
+                        
+                        r = requests.post(f"{base_url}/api/chat", json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": system_map},
+                                {"role": "user", "content": prompt_map}
+                            ],
+                            "options": {"temperature": 0.2, "num_predict": answer_max_tokens, "num_ctx": num_ctx}
+                        }, timeout=300)
+                        
+                        if r.status_code == 200:
+                            jd = r.json()
+                            summary = jd.get("message", {}).get("content") or jd.get("response") or ""
+                            if answer_sink_path and summary:
+                                _append_to_file(answer_sink_path, f"\n\n# {pth}\n{summary}\n")
+                            if summary:
+                                per_doc.append((pth, summary))
+                    except Exception:
+                        continue
+
+                # Combine summaries
+                if per_doc:
+                    system_reduce = "Combine document summaries into a short, structured overview with headings and bullet points; be faithful to inputs."
+                    reduce_input = "\n\n----\n\n".join([f"{p}\n{s}" for p, s in per_doc[:30]])
+                    reduce_prompt = (
+                        "Combine the following single-document summaries into one concise overview.\n"
+                        "Group by themes or projects and include document paths when relevant.\n\n" + reduce_input + "\n"
+                    )
+                    
+                    try:
+                        rr = requests.post(f"{base_url}/api/chat", json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": system_reduce},
+                                {"role": "user", "content": reduce_prompt}
+                            ],
+                            "options": {"temperature": 0.2, "num_predict": answer_max_tokens, "num_ctx": num_ctx}
+                        }, timeout=600)
+                        
+                        if rr.status_code == 200:
+                            jd = rr.json()
+                            final_summary = jd.get("message", {}).get("content") or jd.get("response") or ""
+                            if answer_sink_path and final_summary:
+                                _append_to_file(answer_sink_path, f"\n\n# Combined Overview\n{final_summary}\n")
+                        else:
+                            final_summary = ""
+                    except Exception:
+                        final_summary = ""
+                        
+                    # Optional continuation for very long summaries
+                    if final_summary and answer_sink_path and continue_segments > 0:
+                        prev_tail = final_summary[-800:]
+                        for _ in range(continue_segments):
+                            cont_prompt = (
+                                "Continue the previous overview exactly from where it stopped; "
+                                "no repetition and keep the same structure.\n"
+                                f"Last 800 chars for context:\n{prev_tail}\n"
+                            )
+                            try:
+                                cr = requests.post(f"{base_url}/api/chat", json={
+                                    "model": model,
+                                    "messages": [
+                                        {"role": "system", "content": "Continue the same overview; no restarts; no summaries; just continue."},
+                                        {"role": "user", "content": cont_prompt}
+                                    ],
+                                    "options": {"temperature": 0.2, "num_predict": answer_max_tokens, "num_ctx": num_ctx}
+                                }, timeout=180)
+                                
+                                if cr.status_code != 200:
+                                    break
+                                    
+                                cd = cr.json()
+                                seg = cd.get("message", {}).get("content") or cd.get("response") or ""
+                                if not seg.strip():
+                                    break
+                                    
+                                _append_to_file(answer_sink_path, seg)
+                                prev_tail = (prev_tail + seg)[-800:]
+                            except Exception:
+                                break
+                else:
+                    final_summary = f"Found {len(pdfs)} PDF files but could not generate summaries. Check if documents are embedded in the knowledge base."
+
+                if not final_summary.strip():
+                    final_summary = f"Found {len(pdfs)} PDF files but could not produce a summary; try limiting scope or confirm embeddings exist."
+
+                if save_md and not answer_sink_path:
+                    try:
+                        outp = os.path.abspath(save_md if isinstance(save_md, str) else "./knowledgebot_summary.md")
+                        with open(outp, "w", encoding="utf-8") as f:
+                            f.write(final_summary)
+                    except Exception:
+                        pass
+
+                display = final_summary
+                sources = [{"intent": "summarize_folder", "pdfs_considered": len(pdfs), "summarized": len(per_doc)}]
+                if answer_sink_path and os.path.exists(os.path.abspath(answer_sink_path)):
+                    display = _preview(final_summary, 4000)
+                    sources.append({"saved_to": os.path.abspath(answer_sink_path)})
+                    
+                return {"answer": display, "sources": sources}
+
+            # GENERIC RAG HANDLER
+
+            collection = self.rag_store.get_or_create()
+            
+            # Generate query embedding
+            try:
+                qvecs = _ollama_embed_batch(base_url, embed_model, [question])
+                qvec = qvecs[0] if qvecs else []
+            except Exception:
+                qvec = []
+
+            if not qvec:
+                return {
+                    "answer": "Embeddings are not available; please ensure an embedding model is pulled (e.g., nomic-embed-text) or use a more specific command.",
+                    "sources": [{"intent": "generic_rag_no_embeddings"}]
+                }
+
+            # Retrieve and rerank contexts
+            try:
+                raw = collection.query(
+                    query_embeddings=[qvec],
+                    n_results=max(top_k * 6, 10),
+                    include=["documents", "metadatas", "distances"]
+                )
+                contexts = (raw.get("documents") or [[]])[0]
+                metas = (raw.get("metadatas") or [[]])[0]
+                dists = (raw.get("distances") or [[]])[0]
+
+                order = _rerank_with_keywords(contexts, dists, question, 0.7)
+                contexts = [contexts[i] for i in order][:top_k]
+                metas = [metas[i] for i in order][:top_k]
+            except Exception:
+                contexts, metas = [], []
+
+            if not contexts:
+                return {
+                    "answer": "No relevant information found in the knowledge base. Try adding more documents or using different search terms.",
+                    "sources": [{"intent": "generic_rag_no_results"}]
+                }
+
+            # Prepare prompt with instructions
+            instruction_hardener = ""
+            ql = question.lower()
+            if "do not summarize" in ql or "plain list" in ql:
+                instruction_hardener = (
+                    "If asked for a list or 'Do not summarize', return only the requested items in plain text, "
+                    "one per line, with no extra commentary.\n"
+                )
+
+            prompt = (
+                "Answer strictly using the provided context; cite file paths when helpful.\n"
+                f"{instruction_hardener}\nContext:\n{os.linesep.join(contexts)}\n\nQuestion: {question}\n"
+            )
+
+            # Generate response
+            answer = ""
+            try:
+                resp = requests.post(f"{base_url}/api/chat", json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "You are a concise assistant strictly grounded in the provided context."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "options": {"temperature": 0.2, "num_predict": answer_max_tokens, "num_ctx": num_ctx}
+                }, timeout=600)
+                
+                if resp.status_code == 200:
+                    jd = resp.json()
+                    answer = jd.get("message", {}).get("content") or jd.get("response") or ""
+                    if answer_sink_path and answer:
+                        _append_to_file(answer_sink_path, answer)
+            except Exception:
+                answer = ""
+
+            # Optional continuation for very long answers
+            if answer and answer_sink_path and continue_segments > 0:
+                prev_tail = answer[-800:]
+                for _ in range(continue_segments):
+                    cont_prompt = (
+                        "Continue the previous answer exactly from where it stopped; no repetition; same structure; "
+                        "do not restart sections.\n"
+                        f"Last 800 chars for context:\n{prev_tail}\n"
+                    )
+                    try:
+                        cr = requests.post(f"{base_url}/api/chat", json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": "Continue the same answer; no restarts; no summaries; just continue."},
+                                {"role": "user", "content": cont_prompt}
+                            ],
+                            "options": {"temperature": 0.2, "num_predict": answer_max_tokens, "num_ctx": num_ctx}
+                        }, timeout=180)
+                        
+                        if cr.status_code != 200:
+                            break
+                            
+                        cd = cr.json()
+                        seg = cd.get("message", {}).get("content") or cd.get("response") or ""
+                        if not seg.strip():
+                            break
+                            
+                        _append_to_file(answer_sink_path, seg)
+                        prev_tail = (prev_tail + seg)[-800:]
+                    except Exception:
+                        break
+
+            # OpenAI fallback if Ollama fails
+            if not answer.strip():
+                api_key = os.getenv("OPENAI_API_KEY")
+                if api_key:
+                    try:
+                        from openai import OpenAI
+                        client = OpenAI(api_key=api_key)
+                        oai = client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[
+                                {"role": "system", "content": "You are a concise assistant strictly grounded in the provided context."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            temperature=0.2
+                        )
+                        answer = oai.choices[0].message.content or ""
+                    except Exception as e:
+                        answer = f"Both Ollama and OpenAI fallback failed: {e}"
+
+            # Save markdown output if requested
+            if save_md and not answer_sink_path:
+                try:
+                    outp = os.path.abspath(save_md if isinstance(save_md, str) else "./knowledgebot_answer.md")
+                    with open(outp, "w", encoding="utf-8") as f:
+                        f.write(answer + "\n")
+                except Exception:
+                    pass
+
+            # Prepare final response
+            display = answer
+            if answer_sink_path and os.path.exists(os.path.abspath(answer_sink_path)):
+                display = _preview(answer, 4000)
+                metas.append({"saved_to": os.path.abspath(answer_sink_path)})
+            metas.append({"intent": "generic_rag"})
+            
+            return {"answer": display, "sources": metas}
+            
+        return Task(config=self.tasks_config["query_task"], agent=self.query_agent(), function=run)  # type: ignore[index]
+
+    @crew
+    def crew(self) -> Crew:
+        """Create and configure the crew with knowledge sources and suppressed verbose output."""
+        # Load knowledge sources from configured directory
+        knowledge_dir = os.getenv("KNOWLEDGE_DIR", DEFAULT_KNOWLEDGE_DIR)
+        k_sources = _load_knowledge_sources(knowledge_dir) if HAS_KNOWLEDGE_SOURCES else []
+        
+        # Optional: Log knowledge source loading
+        try:
+            print(f"[KnowledgeBot] Loaded {len(k_sources)} knowledge sources from {knowledge_dir}")
+        except Exception:
+            pass
+        
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            knowledge_sources=k_sources,
+            verbose=False  # Suppress agent chatter to keep output clean
+        )
+

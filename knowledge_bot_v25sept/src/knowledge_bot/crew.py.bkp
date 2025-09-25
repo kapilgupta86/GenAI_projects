@@ -1,0 +1,391 @@
+# src/knowledge_bot/crew.py
+from typing import Any, Dict, List, Tuple
+import hashlib
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+import requests
+import chromadb
+from dotenv import load_dotenv
+from crewai import Agent, Crew, Process, Task
+from crewai.project import CrewBase, agent, crew, task
+
+# Tooling / agents (project-local)
+from .tools.custom_tool import LocalFileReader, GitHubRepoCloner, GoogleDriveReader
+from .agents.file_agent import build_file_agent
+from .agents.github_agent import build_github_agent
+from .agents.drive_agent import build_drive_agent
+from .agents.embed_agent import build_embed_agent
+from .agents.query_agent import build_query_agent
+
+load_dotenv()
+
+# File-relative config lookups so installs work everywhere
+BASE_DIR = Path(__file__).resolve().parent
+AGENTS_YAML = (BASE_DIR / "config" / "agents.yaml").as_posix()
+TASKS_YAML = (BASE_DIR / "config" / "tasks.yaml").as_posix()
+
+# In-cluster default for Ollama; can be overridden with OLLAMA_BASE_URL
+DEFAULT_OLLAMA_BASE = "http://ollama-service.ollama.svc.cluster.local:11434"
+
+
+def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> List[str]:
+    """Simple sliding window chunker with overlap; robust to edge cases."""
+    if not text:
+        return []
+    if chunk_size <= 0:
+        chunk_size = 800
+    if overlap < 0 or overlap >= chunk_size:
+        overlap = max(0, min(100, chunk_size // 4))
+    chunks: List[str] = []
+    n = len(text)
+    start = 0
+    while start < n:
+        end = min(n, start + chunk_size)
+        chunks.append(text[start:end])
+        if end >= n:
+            break
+        # next window starts chunk_size - overlap ahead
+        start = max(0, end - overlap)
+    return chunks
+
+
+def _doc_id(s: str) -> str:
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+
+def _ollama_embed_batch(base_url: str, model: str, texts: List[str]) -> List[List[float]]:
+    """Batch embeddings with graceful fallbacks across Ollama API shapes."""
+    if not texts:
+        return []
+    try:
+        resp = requests.post(
+            f"{base_url}/api/embed",
+            json={"model": model, "input": texts},
+            timeout=180,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            # Newer shape
+            if isinstance(data, dict) and "embeddings" in data:
+                return data["embeddings"]
+            # Some builds return { data: [ { embedding: [...] } ] }
+            if isinstance(data, dict) and "data" in data:
+                return [item.get("embedding", []) for item in data.get("data", [])]
+            # Single vector shape
+            if isinstance(data, dict) and "embedding" in data:
+                return [data["embedding"]] * len(texts)
+    except Exception:
+        # Fall through to per-item legacy endpoint
+        pass
+
+    # Legacy per-item fallback
+    vectors: List[List[float]] = []
+    for t in texts:
+        r = requests.post(
+            f"{base_url}/api/embeddings",
+            json={"model": model, "prompt": t},
+            timeout=180,
+        )
+        r.raise_for_status()
+        jd = r.json()
+        vectors.append(jd.get("embedding", []))
+    return vectors
+
+
+@dataclass
+class RAGStore:
+    client: chromadb.PersistentClient
+    collection_name: str
+
+    def get_or_create(self):
+        return self.client.get_or_create_collection(self.collection_name)
+
+
+@CrewBase
+class KnowledgeBotCrew:
+    """Ingest → embed to Chroma → retrieve and answer via Ollama (with optional OpenAI fallback)."""
+
+    agents_config = AGENTS_YAML
+    tasks_config = TASKS_YAML
+
+    def __init__(self):
+        self.persist_dir = os.path.abspath("./kb_chroma")
+        os.makedirs(self.persist_dir, exist_ok=True)
+        self.chroma = chromadb.PersistentClient(path=self.persist_dir)
+        self.collection_name = "knowledgebot_collection"
+        self.rag_store = RAGStore(client=self.chroma, collection_name=self.collection_name)
+
+    # Agent factories (YAML-configured prompts/backstories kept minimal for non-LLM tasks)
+    @agent
+    def file_agent(self) -> Agent:
+        return build_file_agent(self.agents_config["file_agent"])  # type: ignore[index]
+
+    @agent
+    def github_agent(self) -> Agent:
+        return build_github_agent(self.agents_config["github_agent"])  # type: ignore[index]
+
+    @agent
+    def drive_agent(self) -> Agent:
+        return build_drive_agent(self.agents_config["drive_agent"])  # type: ignore[index]
+
+    @agent
+    def embed_agent(self) -> Agent:
+        return build_embed_agent(self.agents_config["embed_agent"])  # type: ignore[index]
+
+    @agent
+    def query_agent(self) -> Agent:
+        return build_query_agent(self.agents_config["query_agent"])  # type: ignore[index]
+
+    # ----------------------
+    # Ingest
+    # ----------------------
+    @task
+    def ingest_task(self) -> Task:
+        def run(inputs: Dict[str, Any]) -> Dict[str, Any]:
+            folder = inputs.get("folder_path") or os.path.join(os.path.expanduser("~"), "Desktop")
+            gh_url = inputs.get("github_url") or ""
+            use_drive = bool(inputs.get("use_drive"))
+            drive_folder_id = inputs.get("drive_folder_id") or None
+
+            local_docs = LocalFileReader(folder)
+            _, gh_docs = GitHubRepoCloner(gh_url) if gh_url else ("", [])
+            drive_docs = GoogleDriveReader(drive_folder_id) if use_drive else []
+
+            all_docs: List[Dict[str, Any]] = []
+            for d in (local_docs + gh_docs + drive_docs):
+                # Ensure minimal metadata structure exists
+                meta = d.get("metadata", {})
+                if "source" not in meta:
+                    # Try to attach a best-effort source
+                    meta["source"] = d.get("path") or meta.get("path") or meta.get("name") or "unknown"
+                if d.get("content"):
+                    d["metadata"] = meta
+                    all_docs.append(d)
+
+            return {"documents": all_docs, "count": len(all_docs)}
+
+        return Task(config=self.tasks_config["ingest_task"], agent=self.file_agent(), function=run)  # type: ignore[index]
+
+    # ----------------------
+    # Embed
+    # ----------------------
+    @task
+    def embed_task(self) -> Task:
+        def run(inputs: Dict[str, Any]) -> Dict[str, Any]:
+            documents = inputs.get("documents", [])
+            if not documents:
+                return {"embedded": 0, "collection": self.collection_name}
+
+            base_url = os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE)
+            # Default to "mistral" if no dedicated embedding model is pulled; switch to "nomic-embed-text" once available.
+            embed_model = inputs.get("embed_model") or "mistral"
+
+            collection = self.rag_store.get_or_create()
+            ids: List[str] = []
+            metadatas: List[Dict[str, Any]] = []
+            texts: List[str] = []
+
+            for d in documents:
+                meta = d.get("metadata", {})
+                # Keep source/path in metadata for at-a-glance citations
+                src = meta.get("source") or d.get("path") or "unknown"
+                meta["source"] = src
+
+                for idx, ch in enumerate(_chunk_text(d["content"], chunk_size=800, overlap=100)):
+                    uid = _doc_id(f"{src}::{idx}::{ch[:64]}")
+                    ids.append(uid)
+                    metadatas.append(meta)
+                    texts.append(ch)
+
+            if not texts:
+                return {"embedded": 0, "collection": self.collection_name}
+
+            vectors = _ollama_embed_batch(base_url, embed_model, texts)
+            # Chroma will align lists by position
+            collection.upsert(ids=ids, embeddings=vectors, metadatas=metadatas, documents=texts)
+            return {"embedded": len(ids), "collection": self.collection_name}
+
+        return Task(config=self.tasks_config["embed_task"], agent=self.embed_agent(), function=run)  # type: ignore[index]
+
+    # ----------------------
+    # Query
+    # ----------------------
+    @task
+    def query_task(self) -> Task:
+        def _rerank_with_keywords(
+            contexts: List[str],
+            distances: List[float],
+            query: str,
+            alpha: float = 0.7,
+        ) -> List[int]:
+            """Combine vector similarity (from distances) with simple keyword overlap."""
+            # Convert distances (smaller is better) to similarity in [0, 1]
+            if not distances:
+                distances = [1.0] * len(contexts)
+            sims = []
+            for d in distances:
+                try:
+                    # Robust convert; clamp into [0, 1]
+                    sim = max(0.0, min(1.0, 1.0 / (1.0 + float(d))))
+                except Exception:
+                    sim = 0.0
+                sims.append(sim)
+            qtokens = set(re.findall(r"\w+", query.lower()))
+            kw = []
+            for c in contexts:
+                ctoks = set(re.findall(r"\w+", (c or "").lower()))
+                kw.append(len(qtokens & ctoks) / (len(qtokens) + 1e-6))
+            scores = [(alpha * sims[i] + (1 - alpha) * kw[i], i) for i in range(len(contexts))]
+            scores.sort(key=lambda x: x[0], reverse=True)
+            return [i for _, i in scores]
+
+        def run(inputs: Dict[str, Any]) -> Dict[str, Any]:
+            question = inputs.get("query") or ""
+            if not question.strip():
+                return {"answer": "Please provide a query.", "sources": []}
+
+            base_url = os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE)
+            # "mistral" is present today; switch to "nomic-embed-text" when pulled
+            embed_model = inputs.get("embed_model") or "mistral"
+            top_k = max(1, int(inputs.get("top_k") or 5))
+            model = inputs.get("model") or "mistral"
+            save_md = inputs.get("save_markdown")
+
+            # Deterministic command mode: list .py and .md files as plain text
+            qlow = question.lower()
+            if ("list" in qlow and ".py" in qlow and ".md" in qlow):
+                base_path = inputs.get("folder_path") or os.path.join(os.path.expanduser("~"), "Desktop")
+                m = re.search(r"\{([^}]+)\}", question)
+                if m and m.group(1).strip():
+                    base_path = m.group(1).strip()
+                matches: List[str] = []
+                for root_dir, _, files in os.walk(base_path):
+                    for name in files:
+                        if name.endswith(".py") or name.endswith(".md"):
+                            matches.append(os.path.join(root_dir, name))
+                matches.sort()
+                plain = "\n".join(matches)
+                # Optional save
+                if save_md:
+                    out_path = os.path.abspath(save_md if isinstance(save_md, str) else "./knowledgebot_answer.md")
+                    try:
+                        with open(out_path, "w", encoding="utf-8") as f:
+                            f.write(plain)
+                    except Exception:
+                        pass
+                return {"answer": plain, "sources": []}
+
+            # Vector retrieval
+            collection = self.rag_store.get_or_create()
+            try:
+                qvecs = _ollama_embed_batch(base_url, embed_model, [question])
+                qvec = qvecs[0] if qvecs else []
+            except Exception:
+                qvec = []
+
+            contexts: List[str] = []
+            metas: List[Dict[str, Any]] = []
+            dists: List[float] = []
+
+            if qvec:
+                # Retrieve more than needed, then re-rank
+                raw = collection.query(
+                    query_embeddings=[qvec],
+                    n_results=max(top_k * 6, 10),
+                    include=["documents", "metadatas", "distances"],
+                )
+                contexts = (raw.get("documents") or [[]])[0]
+                metas = (raw.get("metadatas") or [[]])[0]
+                dists = (raw.get("distances") or [[]])[0]
+
+                # Re-rank with simple keyword overlap to boost precision
+                order = _rerank_with_keywords(contexts, dists, question, alpha=0.7)
+                contexts = [contexts[i] for i in order][:top_k]
+                metas = [metas[i] for i in order][:top_k]
+            else:
+                # No embeddings available; return a helpful message
+                return {
+                    "answer": "Embeddings are not available; please ensure an embedding model is pulled (e.g., nomic-embed-text) or use a more specific command.",
+                    "sources": [],
+                }
+
+            # Instruction shaping to honor terse/formatting intents
+            instruction_hardener = ""
+            if "do not summarize" in qlow or "plain list" in qlow:
+                instruction_hardener = (
+                    "If the user asks for a list or explicitly says 'Do not summarize', "
+                    "return only the requested items in plain text, one per line, with no extra commentary.\n"
+                )
+
+            prompt = (
+                "Answer strictly using the provided context; cite file paths when helpful.\n"
+                f"{instruction_hardener}"
+                f"\nContext:\n{os.linesep.join(contexts)}\n\nQuestion: {question}\n"
+            )
+
+            answer = ""
+            try:
+                resp = requests.post(
+                    f"{base_url}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "You are a concise assistant that is strictly grounded in the provided context.",
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        "options": {"temperature": 0.2},
+                    },
+                    timeout=180,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    answer = data.get("message", {}).get("content") or data.get("response") or ""
+            except Exception:
+                answer = ""
+
+            # Optional cloud fallback (kept but never required)
+            if not answer.strip():
+                api_key = os.getenv("OPENAI_API_KEY")
+                if api_key:
+                    try:
+                        from openai import OpenAI
+
+                        client = OpenAI(api_key=api_key)
+                        oai = client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": "You are a concise assistant that is strictly grounded in the provided context.",
+                                },
+                                {"role": "user", "content": prompt},
+                            ],
+                            temperature=0.2,
+                        )
+                        answer = oai.choices[0].message.content or ""
+                    except Exception as e:
+                        answer = f"Both Ollama and OpenAI fallback failed: {e}"
+
+            # Optional save
+            if save_md:
+                out_path = os.path.abspath(save_md if isinstance(save_md, str) else "./knowledgebot_answer.md")
+                try:
+                    with open(out_path, "w", encoding="utf-8") as f:
+                        f.write(f"{answer}\n")
+                except Exception:
+                    pass
+
+            return {"answer": answer, "sources": metas}
+
+        return Task(config=self.tasks_config["query_task"], agent=self.query_agent(), function=run)  # type: ignore[index]
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(agents=self.agents, tasks=self.tasks, process=Process.sequential, verbose=True)
+

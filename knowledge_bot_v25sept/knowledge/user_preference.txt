@@ -1,0 +1,9 @@
+name: Kapil
+role: Cloud Infrastructure Engineer
+interests: AI, DevOps, Kubernetes
+location: India
+
+Projects:
+- KnowledgeBot AI
+- Ollama on Kubernetes  
+- CrewAI Knowledge Integration

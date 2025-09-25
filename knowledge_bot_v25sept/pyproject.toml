@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "knowledge-bot"
+version = "0.1.1"
+description = "KnowledgeBot: CrewAI + Ollama RAG with Chroma and Gradio"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+  "crewai>=0.51.0",
+  "gradio>=4.37.2",
+  "chromadb>=0.5.10,<0.6.0",
+  "PyPDF2>=3.0.1",
+  "python-docx>=1.1.0",
+  "openpyxl>=3.1.2",
+  "pandas>=2.2.2",
+  "PyDrive2>=1.20.0",
+  "GitPython>=3.1.43",
+  "pyyaml>=6.0.2",
+  "python-dotenv>=1.0.1",
+  "requests>=2.32.3",
+  "openai>=1.40.0",
+  "pdfplumber",
+  "rank-bm25"
+]
+
+[project.scripts]
+run_crew = "knowledge_bot.main:run"
+
+[tool.crewai]
+type = "crew"
+
+[tool.crewai.llms.ollama_local]
+provider = "ollama"
+model = "llama3"
+base_url = "${OLLAMA_BASE_URL}"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+knowledge_bot = ["config/*.yaml"]
+
