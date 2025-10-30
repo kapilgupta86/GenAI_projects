@@ -1,0 +1,11 @@
+crewai==1.2.1
+pydantic>=2.11.9
+pandas==2.2.3
+numpy==1.26.4
+yfinance==0.2.43
+duckduckgo-search==6.3.7
+beautifulsoup4==4.12.3
+requests==2.32.3
+plotly==5.24.1
+streamlit==1.39.0
+python-dotenv>=1.1.1

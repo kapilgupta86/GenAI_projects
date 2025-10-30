@@ -1,0 +1,32 @@
+Do this in CMD (works without PowerShell activation)
+1) Create venv and upgrade pip:
+cd C:\Users\Dell\Desktop\AI Project\stock-research-crew
+python -m venv .venv
+.venv\Scripts\python -m pip install --upgrade pip
+2) Install deps:
+.venv\Scripts\python -m pip install -r requirements.txt
+3) Configure LLM (pick one):
+OpenAI: set OPENAI_API_KEY in this CMD session:
+set OPENAI_API_KEY=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
+
+used openrouter to create the openapi key
+
+Ollama: install Ollama for Windows, run:
+ollama pull llama3.1
+set OLLAMA_BASE_URL=http://localhost:11434
+4) Run CLI smoke test:
+.venv\Scripts\python main.py
+C:\Users\Dell\Desktop\AI Project\stock-research-crew>.venv\Scripts\python main.py
+Traceback (most recent call last):
+  File "C:\Users\Dell\Desktop\AI Project\stock-research-crew\main.py", line 3, in <module>
+    from src.orchestrator import build_crew
+  File "C:\Users\Dell\Desktop\AI Project\stock-research-crew\src\orchestrator.py", line 2, in <module>
+    from crewai import Crew, Task
+ModuleNotFoundError: No module named 'crewai'
+
+
+fix by: pip install crewai
+5) Run GUI:
+.venv\Scripts\python -m streamlit run app.py
+Open http://localhost:8501
+If any install errors appear, paste them and I’ll adjust versions quickly.
