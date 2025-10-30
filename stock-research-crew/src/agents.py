@@ -2,45 +2,14 @@ from typing import List
 from crewai import Agent
 
 from .tools.wrappers import (
-	tool_web_search,
-	tool_fetch_page_summary,
-	tool_fetch_price_history,
-	tool_compute_trend_metrics,
-	tool_simple_technical_flags,
-	tool_fetch_fundamentals,
+	WEB_SEARCH,
+	FETCH_PAGE_SUMMARY,
+	FETCH_PRICE_HISTORY,
+	COMPUTE_TREND_METRICS,
+	SIMPLE_TECH_FLAGS,
+	FETCH_FUNDAMENTALS,
 )
 from .llm import get_llm
-
-
-def _tools_for_researcher():
-	return [
-		{"name": "web_search", "description": "DuckDuckGo web search", "function": tool_web_search},
-		{"name": "fetch_page_summary", "description": "Fetch and summarize webpage", "function": tool_fetch_page_summary},
-		{"name": "fetch_price_history", "description": "OHLCV for ticker as JSON", "function": tool_fetch_price_history},
-		{"name": "compute_trend_metrics", "description": "Trend metrics from prices JSON", "function": tool_compute_trend_metrics},
-		{"name": "simple_technical_flags", "description": "Bullish flags from prices JSON", "function": tool_simple_technical_flags},
-		{"name": "fetch_fundamentals", "description": "Subset fundamentals via yfinance", "function": tool_fetch_fundamentals},
-	]
-
-
-def _tools_for_analyst():
-	return [
-		{"name": "fetch_price_history", "description": "OHLCV for ticker as JSON", "function": tool_fetch_price_history},
-		{"name": "compute_trend_metrics", "description": "Trend metrics from prices JSON", "function": tool_compute_trend_metrics},
-		{"name": "simple_technical_flags", "description": "Bullish flags from prices JSON", "function": tool_simple_technical_flags},
-		{"name": "fetch_fundamentals", "description": "Subset fundamentals via yfinance", "function": tool_fetch_fundamentals},
-	]
-
-
-def _tools_for_reviewer():
-	return [
-		{"name": "fetch_price_history", "description": "OHLCV for ticker as JSON", "function": tool_fetch_price_history},
-		{"name": "compute_trend_metrics", "description": "Trend metrics from prices JSON", "function": tool_compute_trend_metrics},
-		{"name": "simple_technical_flags", "description": "Bullish flags from prices JSON", "function": tool_simple_technical_flags},
-		{"name": "fetch_fundamentals", "description": "Subset fundamentals via yfinance", "function": tool_fetch_fundamentals},
-		{"name": "web_search", "description": "DuckDuckGo web search", "function": tool_web_search},
-		{"name": "fetch_page_summary", "description": "Fetch and summarize webpage", "function": tool_fetch_page_summary},
-	]
 
 
 def create_researcher() -> Agent:
@@ -57,7 +26,7 @@ def create_researcher() -> Agent:
 		),
 		allow_delegation=False,
 		allow_code_execution=False,
-		tools=_tools_for_researcher(),
+		tools=[WEB_SEARCH, FETCH_PAGE_SUMMARY, FETCH_PRICE_HISTORY, COMPUTE_TREND_METRICS, SIMPLE_TECH_FLAGS, FETCH_FUNDAMENTALS],
 		llm=get_llm(),
 	)
 
@@ -75,7 +44,7 @@ def create_analyst() -> Agent:
 		),
 		allow_delegation=False,
 		allow_code_execution=False,
-		tools=_tools_for_analyst(),
+		tools=[FETCH_PRICE_HISTORY, COMPUTE_TREND_METRICS, SIMPLE_TECH_FLAGS, FETCH_FUNDAMENTALS],
 		llm=get_llm(),
 	)
 
@@ -93,6 +62,6 @@ def create_reviewer() -> Agent:
 		),
 		allow_delegation=False,
 		allow_code_execution=False,
-		tools=_tools_for_reviewer(),
+		tools=[FETCH_PRICE_HISTORY, COMPUTE_TREND_METRICS, SIMPLE_TECH_FLAGS, FETCH_FUNDAMENTALS, WEB_SEARCH, FETCH_PAGE_SUMMARY],
 		llm=get_llm(),
 	)
