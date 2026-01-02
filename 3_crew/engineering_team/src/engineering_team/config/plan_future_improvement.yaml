@@ -1,0 +1,108 @@
+# This file describes planned enhancements and non-breaking integration guidance.
+# Add this file to the repo to store future plan items, migration notes, and
+# safe integration instructions. Existing code will not read this file
+# unless explicitly updated to do so — using this file is opt-in.
+
+meta:
+  created_by: "automation / kapilgupta86"
+  created_at: "2026-01-02"
+  version: 1
+  description: >
+    Planned enhancements for agents.yaml and CI/testing/observability integration.
+    This file is intentionally opt-in and non-breaking; feature flags default to off.
+
+compatibility_and_safety:
+  non_breaking:
+    description: >
+      The file is read only by processes that explicitly load it. Without changes to
+      application code or CI, nothing will change. Use a safe loader that:
+      - ignores unknown keys
+      - validates schema lightly
+      - uses feature toggles (default: disabled)
+  feature_toggle_pattern:
+    - name: "enable_feedback_runner"
+      default: false
+      description: "If true, CI/runner will read feedback settings and enable auto-issue creation"
+    - name: "enable_observability_integration"
+      default: false
+      description: "If true, deploy/test jobs will push structured logs and metrics to observability targets"
+
+feature_flags:
+  enable_feedback_runner: false
+  enable_observability_integration: false
+  enable_ci_runner_from_config: false
+
+planned_enhancements:
+  - id: FEED-001
+    title: "Agent feedback schema v1"
+    description: >
+      Add a standard 'feedback' schema for all agents (already present in agents.yaml).
+      Standardize allowed actions (create_issue, attach_logs, slack_post, send_email, retry).
+    priority: high
+    safe_rollout: true
+  - id: CI-002
+    title: "Optional CI workflow templates and reporters"
+    description: >
+      Provide a reusable GitHub Actions template that can read agents.yaml and plan_future_improvement.yaml
+      and optionally run per-agent test_commands, upload junit artifacts and create issues on failures.
+    priority: high
+    safe_rollout: true
+  - id: OBS-003
+    title: "Observability integration"
+    description: >
+      Add optional Sentry / Prometheus hooks and structured log attachment on failures.
+    priority: medium
+    safe_rollout: true
+  - id: SCRIPTS-004
+    title: "CI runner script"
+    description: >
+      A small, optional python script (tools/ci_runner.py) that loads agents.yaml and plan_future_improvement.yaml
+      and runs configured commands only when feature flags are enabled.
+    priority: medium
+    safe_rollout: true
+
+implementation_notes:
+  loader_pattern:
+    description: >
+      Use a safe loader that:
+      1. Only loads plan_future_improvement.yaml if found.
+      2. Merges values with default behavior; does not override agents.yaml unless explicitly enabled.
+      3. Honors feature flags; default is to do nothing.
+    sample_python_snippet: |
+      # safe loader pseudocode (run only in opt-in places)
+      import os, yaml
+      def load_optional_plan(path="config/plan_future_improvement.yaml"):
+          if not os.path.exists(path):
+              return {}
+          with open(path, "r") as f:
+              raw = yaml.safe_load(f) or {}
+          # Basic validation and defaults
+          flags = raw.get("feature_flags", {})
+          # Ensure defaults are present
+          return {"meta": raw.get("meta", {}), "feature_flags": flags, "planned_enhancements": raw.get("planned_enhancements", [])}
+
+  ci_integration_guidelines:
+    - "Do not change existing CI steps by default. Add an optional job that runs only when enable_ci_runner_from_config is true."
+    - "When adding automatic issue creation, ensure the job uses least-privilege token (GITHUB_TOKEN) and includes a short backoff or rate-limit."
+    - "Store sensitive integration keys (Sentry/Slack) in secrets, and only use them if feature flags are true."
+
+migration_and_rollout:
+  - step: "Create file (this file). No runtime changes occur."
+  - step: "Add small optional CI job that checks plan_future_improvement.feature_flags and optionally runs the runner (opt-in via env var)."
+  - step: "Gradual rollout: enable per-repo via repo settings or CI variables; verify no changes when feature flags are false."
+  - rollback: "Remove the CI job or set feature_flags to false; no data loss expected."
+
+testing_and_validation:
+  - "Unit test the loader to ensure missing file -> empty dict"
+  - "Unit test feature flag gating"
+  - "Integration test on a branch that sets enable_ci_runner_from_config true to validate the end-to-end flow"
+
+recommended_next_steps:
+  - "Add a small optional CI job (or workflow_dispatch) that runs CI runner only when ENABLE_CONFIG_RUNNER=true is set in the workflow environment."
+  - "Implement tools/ci_runner.py as opt-in utility that respects feature flags."
+  - "Document in README.md: how to opt-in to new features and how to revert."
+  - "Add schema validation tests (lightweight) to detect typos in agents.yaml vs expected keys."
+
+notes:
+  - "This file is read-only and opt-in — it will not change behaviour unless you explicitly wire it into CI or runtime code."
+  - "Keep feature flags defaulted to false to guarantee non-breaking addition."
