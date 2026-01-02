@@ -1,124 +1,396 @@
-KnowledgeBot v25sept - Comprehensive Project Documentation
-1. List of Features
-Per-page PDF parsing with precise page citation
+# KnowledgeBot v25sept - Comprehensive Project Documentation
 
-BM25 retrieval algorithm with synonym expansion and version boost support
+## Project Overview
 
-Robust Ollama client handling both streaming and non-streaming JSON responses
+**KnowledgeBot** is an intelligent, hybrid RAG (Retrieval-Augmented Generation) assistant designed to answer questions about documents while providing precise source citations. It combines fast, deterministic responses for simple queries with high-quality, context-grounded answers for complex document questions using an improved RAG pipeline with Ollama integration.
 
-Intent-aware routing for personal info, file listing, project discovery, and document queries
+***
 
-Multi-format document ingestion (PDF, DOCX, TXT, CSV, XLSX, MD)
+## 1. List of Features
 
-Stepwise instruction generation for installation/procedure queries
+### Core Features
 
-Gradio-based user interface with optional Ollama URL configuration
+- **Per-Page PDF Parsing**: Extracts text from PDFs on a page-by-page basis, enabling precise page citations in responses
+- **BM25 Retrieval Algorithm**: Implements probabilistic ranking with intelligent synonym expansion and version boost support (e.g., 1.9.0, v1.9.0, 1_9_0)
+- **Robust Ollama Client**: Handles both streaming and non-streaming JSON responses with automatic fallback mechanisms
+- **Intent-Aware Routing**: Automatically detects query intent (personal info, file listing, project discovery, or document queries)
+- **Multi-Format Document Ingestion**: Supports PDF, DOCX, TXT, CSV, XLSX, and MD files
+- **Stepwise Instruction Generation**: Recognizes installation/procedure queries and returns numbered, actionable steps
+- **Gradio-Based User Interface**: Simple, intuitive web UI with optional Ollama URL configuration
+- **Page-Aware Context Composition**: Maintains metadata about source documents and pages for citation
+- **Graceful Fallback Mechanisms**: Operates even when BM25 is unavailable or dependencies are missing
 
-Page-aware context composition with metadata tracking
 
-Graceful fallback mechanisms for missing dependencies
+### Advanced Features
 
-2. Key Advantages Over Available Solutions
-Accurate Page Citations: Unlike traditional RAG systems, provides exact page numbers in responses
+- Query expansion with synonym dictionary
+- Version-aware document matching
+- Multiple fallback search strategies (BM25 → Simple Keyword Search)
+- Free port detection for UI server
+- Configurable model selection (mistral, llama3.2, gemma, etc.)
+- Markdown export of responses
 
-Intelligent Query Routing: Automatically detects query intent to avoid unnecessary LLM calls for simple questions
+***
 
-Version-Aware Retrieval: Understands version formats (1.9.0, v1.9.0, 1_9_0) for better document matching
+## 2. Key Advantages Over Available Solutions
 
-Procedural Answer Formatting: Recognizes installation/setup queries and returns numbered steps
+| Aspect | KnowledgeBot | Traditional RAG | OpenAI RAG | Enterprise Solutions |
+| :-- | :-- | :-- | :-- | :-- |
+| **Page Citations** | ✅ Exact page numbers | ❌ Chunk IDs only | ⚠️ Vague references | ⚠️ Limited |
+| **Query Routing** | ✅ Intelligent intent detection | ❌ All queries to LLM | ❌ All queries to API | ✅ Available but expensive |
+| **Version Awareness** | ✅ Built-in | ❌ No | ❌ No | ❌ Requires config |
+| **Local Deployment** | ✅ Ollama (free) | ✅ FAISS/Chroma | ❌ Cloud only | ❌ Cloud/On-prem (expensive) |
+| **Cost** | 🟢 Free | 🟢 Free | 🔴 Pay-per-query | 🔴 Expensive |
+| **Privacy** | ✅ Complete control | ✅ Local | ❌ Cloud storage | ⚠️ Enterprise agreement |
+| **Procedural Answers** | ✅ Numbered steps | ❌ Paragraph form | ❌ Paragraph form | ✅ Available |
+| **Multi-Format Support** | ✅ 6+ formats | ⚠️ Limited | ⚠️ Limited | ✅ Extensive |
 
-Lightweight & Extensible: Works with local Ollama instead of requiring cloud APIs
 
-Multi-Format Support: Handles various document types without format-specific configuration
+***
 
-Fallback Mechanisms: Graceful degradation when BM25 unavailable, Ollama issues, or missing dependencies
+## 3. High-Level Design
 
-3. High-Level Design
-The system follows a three-tier architecture:
+### System Architecture
 
-Input Layer: Gradio UI accepts queries, file paths, and configuration parameters
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         User Interface                           │
+│                    Gradio Web Application                        │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ Query Input │ Config Settings │ Model Selection │ Results │ │
+│  └────────────────────────────────────────────────────────────┘ │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Request Processing Layer                        │
+│  ┌──────────────┐      ┌──────────────┐      ┌──────────────┐  │
+│  │   Intent     │──────▶│   Query      │──────▶│  Response    │  │
+│  │  Detection   │      │  Processor   │      │  Formatter   │  │
+│  └──────────────┘      └──────────────┘      └──────────────┘  │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+         ┌─────────────────┼─────────────────┐
+         ▼                 ▼                 ▼
+    ┌──────────┐    ┌──────────┐    ┌──────────┐
+    │ Personal │    │  File    │    │   RAG    │
+    │  Info    │    │ Listing  │    │ Pipeline │
+    │ Handler  │    │ Handler  │    │ Handler  │
+    └──────────┘    └──────────┘    └──────────┘
+                                          │
+                                          ▼
+                          ┌───────────────────────────┐
+                          │  Document Processing     │
+                          │ ┌─────────────────────┐ │
+                          │ │ Load & Parse Files  │ │
+                          │ │ Chunk Content       │ │
+                          │ │ Index with Metadata │ │
+                          │ └─────────────────────┘ │
+                          └───────────────────────────┘
+                                          │
+                                          ▼
+                          ┌───────────────────────────┐
+                          │  BM25 Retrieval Engine    │
+                          │ ┌─────────────────────┐ │
+                          │ │ Query Expansion     │ │
+                          │ │ Version Boosting    │ │
+                          │ │ Synonym Matching    │ │
+                          │ │ Ranking & Scoring   │ │
+                          │ └─────────────────────┘ │
+                          └───────────────────────────┘
+                                          │
+                                          ▼
+                          ┌───────────────────────────┐
+                          │  Ollama LLM Integration   │
+                          │ ┌─────────────────────┐ │
+                          │ │ Stream/JSON Handler │ │
+                          │ │ Prompt Engineering  │ │
+                          │ │ Temperature Control │ │
+                          │ │ Context Management  │ │
+                          │ └─────────────────────┘ │
+                          └───────────────────────────┘
+                                          │
+                                          ▼
+                          ┌───────────────────────────┐
+                          │  Page-Cited Response      │
+                          │  with Source Metadata     │
+                          └───────────────────────────┘
+```
 
-Processing Layer: Intent detection routes queries to appropriate handlers (personal info, file listing, or RAG pipeline)
 
-Output Layer: Generates page-cited answers with source metadata
+### Three-Tier Architecture
 
-4. Low-Level Design
-Core Components:
+1. **Input Layer (Presentation)**
+    - Gradio web interface
+    - Accepts queries, file paths, configuration parameters
+    - Displays results with source citations
+2. **Processing Layer (Business Logic)**
+    - Intent detection and routing
+    - Document management (loading, parsing, chunking)
+    - BM25 ranking and retrieval
+    - LLM prompt composition
+3. **Output Layer (Response Generation)**
+    - Ollama LLM integration
+    - Page-aware context composition
+    - Response formatting with citations
+    - Markdown export capability
 
-custom_tool.py: Multi-format file readers with per-page PDF parsing
+***
 
-crew_simple.py: RAG pipeline with BM25 ranking, query expansion, and Ollama integration
+## 4. Low-Level Design
 
-main.py: Gradio UI with free port detection and configuration management
+### Core Components
 
-Data Flow: Query → Intent Detection → Document Loading → Chunking → BM25 Ranking → Context Composition → Ollama Generation → Page-Cited Response
+#### 4.1 custom_tool.py
 
-5. Technology Stack & Component Design
-Framework: Gradio for UI
+**Purpose**: Multi-format file ingestion and parsing
 
-LLM Inference: Ollama with configurable models (mistral, llama3.2, gemma)
+**Key Functions**:
 
-Retrieval: BM25Okapi ranking with synonym expansion
+- `_read_pdf_per_page()`: Extracts text from PDF files page-by-page
+    - Primary method: pdfplumber
+    - Fallback: PyPDF2
+    - Tracks page numbers for citations
+- `_read_docx()`: Parses DOCX documents
+    - Extracts paragraph-level text
+- `_read_txt()`: Reads plain text files
+    - UTF-8 encoding with fallback
+- `_read_csv()`: Processes CSV files
+    - Uses pandas for structured parsing
+    - Handles up to 1000 rows
+- `_read_xlsx()`: Parses Excel spreadsheets
+    - Extracts data into readable format
+- `LocalFileReader()`: Recursive file discovery and ingestion
+    - Walks directory tree
+    - Supports: .pdf, .docx, .txt, .csv, .xlsx, .md
+    - Returns normalized documents with metadata
 
-PDF Parsing: pdfplumber (primary) with PyPDF2 fallback
+**Metadata Tracked**:
 
-Document Processing: pdfplumber, docx, pandas for multiple formats
+```python
+{
+    "content": "extracted text",
+    "metadata": {
+        "source": "/path/to/file",
+        "name": "filename.pdf",
+        "type": ".pdf",
+        "size": 12345,
+        "last_modified": 1672531200,
+        "page": 3,  # for PDFs
+        "page_count": 10  # for PDFs
+    }
+}
+```
 
-Environment: Python 3.10+, UV package manager
 
-6. Implementation & Deployment
-Installation:
+#### 4.2 crew_simple.py
 
+**Purpose**: Core RAG pipeline and LLM integration
+
+**Key Functions**:
+
+1. **Intent Detection** (`_detect_intent()`)
+    - Routes queries to appropriate handler
+    - Intents: `personal_info`, `list_files`, `list_projects`, `rag_query`
+2. **Query Expansion** (`_expand_query_terms()`)
+    - Expands keywords using synonym dictionary
+    - Recognizes version formats
+    - Supports: install/setup, procedure/steps, pod/pods, etc.
+3. **Text Chunking** (`_chunk_text()`)
+    - Default chunk size: 700 tokens
+    - Overlap: 120 tokens
+    - Preserves context across chunks
+4. **Document Loading** (`_load_documents_from_folder()`)
+    - Ingests all supported formats
+    - Creates chunks with metadata
+    - Tracks chunk IDs and total chunks
+5. **BM25 Search** (`_bm25_search()`)
+    - Tokenizes corpus
+    - Scores documents using BM25 algorithm
+    - Applies version boosts (+2.0)
+    - Applies keyword boosts for procedure queries (+1.5)
+    - Returns top-7 ranked documents
+6. **Fallback Search** (`_simple_search()`)
+    - Simple keyword matching
+    - Overlap-based scoring
+    - Phrase bonus calculation
+7. **Ollama Integration** (`_ollama_chat_stream_or_json()`)
+    - Handles streaming responses
+    - Parses JSON responses
+    - Robust error handling
+    - Timeout management (20s connect, 120s read)
+8. **Response Generation** (`_generate_answer_with_ollama()`)
+    - Formats context for LLM
+    - Detects query type (procedure vs. general)
+    - Crafts appropriate prompts
+    - Fallback to simple answers if Ollama unavailable
+
+#### 4.3 main.py
+
+**Purpose**: Gradio UI and application orchestration
+
+**Features**:
+
+- Gradio Blocks interface
+- Free port detection (starts at 7861)
+- Configuration inputs:
+    - Query text
+    - Knowledge directory path
+    - GitHub repo URL (placeholder)
+    - Model selection dropdown
+    - Ollama URL override
+    - Top-K retrieval setting
+    - Markdown export option
+- Response display with copy button
+- Automatic source annotation
+
+
+### Data Flow Diagram
+
+```
+User Query
+    ↓
+[Check if empty] → Error Message
+    ↓ (valid)
+Intent Detection
+    ├→ personal_info: Load user_preference.txt
+    ├→ list_files: List .py/.md files in folder
+    ├→ list_projects: Find project directories
+    └→ rag_query: Execute RAG Pipeline
+              ↓
+         Load Documents from Folder
+              ↓
+         Chunk into 700-token segments
+              ↓
+         Create BM25 Index
+              ↓
+         Expand Query Terms (synonyms, versions)
+              ↓
+         BM25 Ranking
+              ↓
+         (Fallback to Simple Search if needed)
+              ↓
+         Retrieve Top-7 Documents
+              ↓
+         Compose Page-Aware Contexts
+              ↓
+         Format LLM Prompt
+              ↓
+         Call Ollama with Streaming
+              ↓
+         Parse Response (JSON or Stream)
+              ↓
+         Append Source Citations
+              ↓
+         Display in UI
+              ↓
+         (Optional) Save to Markdown
+```
+
+
+***
+
+## 5. Technology Stack \& Component Design
+
+### Technology Stack
+
+| Category | Technology | Purpose |
+| :-- | :-- | :-- |
+| **UI Framework** | Gradio | Web-based user interface |
+| **LLM Inference** | Ollama | Local model serving (mistral, llama3.2, gemma) |
+| **Retrieval** | BM25Okapi (rank-bm25) | Document ranking algorithm |
+| **PDF Processing** | pdfplumber | Primary PDF text extraction |
+| **PDF Fallback** | PyPDF2 | Fallback PDF extraction |
+| **Document Processing** | docx, pandas | DOCX and tabular data handling |
+| **Runtime** | Python 3.10+ | Language and runtime |
+| **Package Manager** | UV | Dependency management (fast alternative to pip) |
+| **Environment** | .env | Configuration management (python-dotenv) |
+
+### Component Dependency Graph
+
+```
+main.py (UI Entry Point)
+├── Gradio
+├── socket (port detection)
+├── os, sys, warnings
+└── crew_simple.py (Processing)
+    ├── typing, os, re, json, requests
+    ├── rank_bm25.BM25Okapi (optional)
+    ├── custom_tool.py (File Loading)
+    │   ├── pdfplumber (optional)
+    │   ├── PyPDF2 (optional)
+    │   ├── docx (optional)
+    │   ├── pandas (optional)
+    │   └── os, typing
+    └── Ollama API (via HTTP requests)
+```
+
+
+### Model Configuration
+
+**Default Configuration**:
+
+```python
+Models Supported (in dropdown):
+- mistral (default)
+- llama3.2
+- llama3.2:1b
+- llama2
+- gemma
+
+Default Ollama Settings:
+- temperature: 0.2 (low randomness)
+- num_predict: 700 (max tokens)
+- num_ctx: 4096 (context window)
+```
+
+
+***
+
+## 6. Implementation \& Deployment
+
+### 6.1 Installation
+
+**Step 1: Install Dependencies**
+
+```bash
+# Install package in editable mode
 pip install -e .
 
-pip install pdfplumber rank-bm25
+# Install optional retrieval library
+pip install rank-bm25
 
-Environment Configuration:
+# Install PDF processing (recommended)
+pip install pdfplumber
 
-OLLAMA_BASE_URL: Ollama endpoint (e.g., http://ollama:11434)
+# Alternative: use UV (faster)
+uv pip install -e .
+uv pip install rank-bm25 pdfplumber
+```
 
-KB_MODEL: Model name (default: mistral)
+**Step 2: Environment Setup**
 
-CREWAI_TELEMETRY_ENABLED: false
+```bash
+# Create .env file in project root
+cat > .env << EOF
+OLLAMA_BASE_URL=http://localhost:11434
+KB_MODEL=mistral
+CREWAI_TELEMETRY_ENABLED=false
+KNOWLEDGE_DIR=./knowledge
+EOF
+```
 
-Execution:
+**Step 3: Prepare Knowledge Base**
 
-python -m knowledge_bot.main
+```bash
+# Create knowledge directory
+mkdir -p knowledge
 
-Access at http://0.0.0.0:7861 (or available free port)
+# Add your documents (PDF, DOCX, TXT, etc.)
+cp /
 
-7. Key Areas for Improvement & Important Features to Add
-Immediate Improvements:
 
-Semantic Search: Add vector embeddings (Chroma, FAISS) alongside BM25
+<div align="center">⁂</div>
 
-Caching Layer: Implement document cache to avoid re-ingestion
+[^1]: https://github.com/kapilgupta86/GenAI_projects/blob/main/knowledge_bot_v25sept/PROJECT_DOCUMENTATION.md```
 
-Authentication: Add user authentication and access control
-
-Batch Processing: Support bulk document ingestion and indexing
-
-API Endpoint: Expose REST API alongside Gradio UI
-
-Advanced Features:
-
-Hybrid Search: Combine BM25 + semantic search with weighted ranking
-
-Multi-Language Support: Handle documents and queries in multiple languages
-
-Citation Anchors: Direct links/anchors to exact source locations
-
-Query Analytics: Track usage patterns and optimize retrieval
-
-Document Versioning: Track document versions and update history
-
-Custom Domain Models: Fine-tuned Ollama models for specific domains
-
-Streaming Responses: Stream long responses to UI in real-time
-
-Document Summarization: Auto-generate document summaries on ingestion
-
-To properly document this, manually create the PROJECT_DOCUMENTATION.md file in the knowledge_bot_v25sept folder with the detailed sections above.
-
-github.com favicon
-New File at knowledge_bot_v25sept · kapilgupta86/GenAI_projects
