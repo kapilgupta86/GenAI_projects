@@ -179,6 +179,7 @@ main():
 The current implementation uses direct context injection rather than retrieval augmentation. All documents are loaded at startup and passed directly in the system prompt.
 
 ##### Query Matching & Retrieval Process
+User Query → System Prompt + Full Document Context → LLM → Semantic Matching → Answer
 
 User Query → Aggregated Document Context → Gemini LLM → Semantic Matching → Answer
 
