@@ -171,6 +171,82 @@ main():
 - `structure_and_validate_data()`: Transforms raw output into structured format
 - `display_results()`: Renders results in UI
 - `handle_errors()`: Comprehensive error handling and logging
+- 
+#### 4.6 Current Implementation: Direct Context Injection
+
+**Architecture Pattern**: Direct Context Injection (NOT RAG-based)
+
+The current implementation uses direct context injection rather than retrieval augmentation. All documents are loaded at startup and passed directly in the system prompt.
+
+##### Query Matching & Retrieval Process
+
+User Query → Aggregated Document Context → Gemini LLM → Semantic Matching → Answer
+
+**Process Steps**:
+
+1. **Document Aggregation (Startup)**
+   - All files from "me/" folder (PDF, DOCX, TXT) are read at initialization
+   - Files concatenated into one large corpus (max 600KB)
+   - Stored in memory as `self.profile_corpus`
+   - Summary from summary.txt also stored separately
+
+2. **System Prompt Construction (Per Request)**
+   - System prompt includes identity context
+   - Optional summary section
+   - **ENTIRE aggregated corpus** (all documents)
+   - Instructions and tool definitions
+   - Full system prompt sent with every chat request
+
+3. **Query Matching Mechanism**
+   - User query NOT compared against indexed documents
+   - Gemini API receives entire system prompt + user query
+   - LLM attention mechanism performs semantic search internally
+   - Identifies conceptually relevant sections within corpus
+   - Synthesizes answer from relevant context
+
+4. **Implementation Details**
+   - read_all_me_files(): Reads and concatenates all documents
+   - system_prompt(): Embeds entire corpus in system prompt
+   - chat(): Sends full context with every request to Gemini API
+
+##### Query-Document Matching Details
+
+**What Happens** (Semantic Matching):
+- User query arrives (e.g., "What is your Kubernetes experience?")
+- Gemini processes query tokens + entire corpus tokens together
+- LLM attention identifies sections about Kubernetes, K8s, cluster management
+- Conceptually related terms matched (NOT just keyword matching)
+- Relevant sections synthesized into response
+
+**What Does NOT Happen**:
+- Query tokens NOT directly compared against document tokens
+- No inverted index or BM25 ranking
+- No vector embeddings or similarity scores
+- No separate retrieval phase
+
+##### Advantages of Current Approach
+- Full context available to LLM
+- Semantic understanding across documents
+- Simple implementation
+- No retrieval latency
+
+##### Limitations of Current Approach
+- Token limit constraint (max 600KB)
+- Cannot handle large document sets
+- Every query processes full corpus
+- Higher API token usage
+- Context pollution from irrelevant documents
+- No relevance ranking
+
+##### Summary: Current Implementation Details
+
+The current implementation is a direct context injection pattern where:
+- All documents are aggregated at startup into a single corpus
+- Full corpus is embedded in the system prompt sent with every request
+- Gemini LLM performs semantic matching internally using its attention mechanisms
+- This is NOT RAG-based as there is no separate retrieval phase
+
+
 
 ## 5. Benefits from Other Available Solutions
 
