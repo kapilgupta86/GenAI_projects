@@ -1,10 +1,3 @@
-<img src="https://r2cdn.perplexity.ai/pplx-full-logo-primary-dark%402x.png" style="height:64px;margin-right:32px"/>
-
-# are you done,
-
-Here is the **COMPLETE PROFESSIONAL DOCUMENT** formatted for easy reading and use:
-
-***
 
 # 🚀 **KAPIL GUPTA - COMPLETE GenAI \& LLM PORTFOLIO SHOWCASE**
 
