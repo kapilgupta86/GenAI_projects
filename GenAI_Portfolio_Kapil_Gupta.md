@@ -38,8 +38,8 @@ Your GenAI portfolio showcases **10+ production-ready projects** across:
 **Unique Positioning:**
 You are rare among GenAI engineers because you combine **deep infra/DevOps expertise** (Kubernetes, K3s, telco cloud) **with bleeding-edge LLM frameworks**. This makes you ideal for:
 
-- 🎯 **Staff/Senior AI Engineer** roles at startups/big tech
 - 🎯 **AI Solutions Architect** for enterprises (on-prem, edge deployments)
+- 🎯 **AI Solutions product Owner** for enterprises (on-prem, edge deployments)
 - 🎯 **Founder/CTO** of GenAI startup (stock analysis, video automation, infra AI)
 
 ***
