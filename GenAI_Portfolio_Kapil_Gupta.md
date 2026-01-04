@@ -25,10 +25,15 @@
 You are showcasing **10+ production-ready GenAI projects** that span:
 
 ✅ **Advanced Agent Frameworks** – CrewAI, LangGraph, AutoGen, MCP
+
 ✅ **Multimodal AI** – Video generation (Wav2Lip), Speech-to-text (Whisper), Audio synthesis
+
 ✅ **Enterprise RAG** – Local inference (Ollama), Vector DBs (Chroma), Intent routing
+
 ✅ **Production Ops** – Kubernetes deployment, containerization, scalable pipelines
+
 ✅ **Domain Expertise** – Stock market analysis, infra/DevOps AI, sales automation
+
 ✅ **Full-Stack Thinking** – From notebooks → APIs → SaaS-ready products
 
 **Target Audience:** GenAI Engineers, AI Architects, Startup Founders, Tech Leads
