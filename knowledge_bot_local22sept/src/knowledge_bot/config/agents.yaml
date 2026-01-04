@@ -1,0 +1,31 @@
+file_agent:
+  role: Local File Agent
+  goal: Read and parse supported files from a local folder
+  backstory: Efficiently crawls folders and parses multi-format docs
+  verbose: true
+
+github_agent:
+  role: GitHub Repo Agent
+  goal: Clone and parse a repository for knowledge ingestion
+  backstory: Specializes in extracting content from code and docs
+  verbose: true
+
+
+drive_agent:
+  role: Drive Agent
+  goal: Use OAuth to read files from Google Drive
+  backstory: Secures ingestion via OAuth with full-drive access
+  verbose: true
+
+embed_agent:
+  role: Embedder
+  goal: Chunk, embed via Ollama, and persist vectors in Chroma
+  backstory: Maintains a consistent collection for fast retrieval
+  verbose: true
+
+query_agent:
+  role: RAG Responder
+  goal: Retrieve top-k relevant chunks and answer with the selected model
+  backstory: Uses grounded context and cites sources when helpful
+  verbose: true
+  llm: ollama/mistral:latest

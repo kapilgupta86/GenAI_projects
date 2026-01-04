@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: knowledge-bot
+Version: 0.1.1
+Summary: KnowledgeBot: CrewAI + Ollama RAG with Chroma and Gradio
+Requires-Python: <3.13,>=3.10
+Requires-Dist: crewai>=0.51.0
+Requires-Dist: gradio>=4.37.2
+Requires-Dist: chromadb<0.6.0,>=0.5.10
+Requires-Dist: PyPDF2>=3.0.1
+Requires-Dist: python-docx>=1.1.0
+Requires-Dist: openpyxl>=3.1.2
+Requires-Dist: pandas>=2.2.2
+Requires-Dist: PyDrive2>=1.20.0
+Requires-Dist: GitPython>=3.1.43
+Requires-Dist: pyyaml>=6.0.2
+Requires-Dist: python-dotenv>=1.0.1
+Requires-Dist: requests>=2.32.3
+Requires-Dist: openai>=1.40.0

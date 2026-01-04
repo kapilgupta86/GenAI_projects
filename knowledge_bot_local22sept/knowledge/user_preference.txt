@@ -1,0 +1,4 @@
+Preferred context weighting: balanced
+Default top_k: 5
+Default embed_model: nomic-embed-text
+

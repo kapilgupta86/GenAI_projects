@@ -1,0 +1,18 @@
+ingest_task:
+  description: Collect documents from local folder, optional GitHub URL, and optional Google Drive folder
+  expected_output: A unified list of documents with metadata for downstream embedding
+  agent: file_agent
+  output_file: null
+
+embed_task:
+  description: Chunk, embed using Ollama embeddings, and upsert into a persistent Chroma collection
+  expected_output: Persisted Chroma collection ready for retrieval
+  agent: embed_agent
+  output_file: null
+
+query_task:
+  description: Retrieve top-k similar chunks and answer the question via Ollama with optional OpenAI fallback
+  expected_output: Final grounded answer text with optional markdown save and source metadata
+  agent: query_agent
+  output_file: null
+
