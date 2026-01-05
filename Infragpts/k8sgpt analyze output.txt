@@ -66,3 +66,292 @@ AI Provider: AI not used; --explain not set
 
 
 k8sgpt-cli:/#
+
+controlplane:~$ echo "Installing k8sgpt..."
+Installing k8sgpt...
+controlplane:~$ curl -L -o k8sgpt_amd64.deb https://github.com/k8sgpt-ai/k8sgpt/releases/download/v0.2.4/k8sgpt_amd64.deb
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100 16.3M  100 16.3M    0     0  13.6M      0  0:00:01  0:00:01 --:--:--  100M
+controlplane:~$ sudo dpkg -i k8sgpt_amd64.deb
+k8sgpt auth -p fake
+kubectl apply -f /root/deploy.yaml
+Selecting previously unselected package k8sgpt.
+(Reading database ... 171686 files and directories currently installed.)
+Preparing to unpack k8sgpt_amd64.deb ...
+Unpacking k8sgpt (0.2.4) ...
+Setting up k8sgpt (0.2.4) ...
+controlplane:~$ k8sgpt --help
+Kubernetes debugging powered by AI
+
+Usage:
+  k8sgpt [command]
+
+Available Commands:
+  analyze     This command will find problems within your Kubernetes cluster
+  auth        Authenticate with your chosen backend
+  completion  Generate the autocompletion script for the specified shell
+  filters     Manage filters for analyzing Kubernetes resources
+  generate    Generate Key for your chosen backend (opens browser)
+  help        Help about any command
+  integration Intergrate another tool into K8sGPT
+  serve       Runs k8sgpt as a server
+  version     Print the version number of k8sgpt
+
+Flags:
+      --config string        config file (default is $HOME/.k8sgpt.yaml)
+  -h, --help                 help for k8sgpt
+      --kubeconfig string    Path to a kubeconfig. Only required if out-of-cluster. (default "/root/.kube/config")
+      --kubecontext string   Kubernetes context to use. Only required if out-of-cluster.
+
+Use "k8sgpt [command] --help" for more information about a command.
+controlplane:~$ k8sgpt integration --help
+Intergrate another tool into K8sGPT. For example:
+
+        k8sgpt integration activate trivy
+
+        This would allow you to deploy trivy into your cluster and use a K8sGPT analyzer to parse trivy results.
+
+Usage:
+  k8sgpt integration [flags]
+  k8sgpt integration [command]
+
+Aliases:
+  integration, integrations
+
+Available Commands:
+  activate    Activate an integration
+  deactivate  Deactivate an integration
+  list        Lists built-in integrations
+
+Flags:
+  -h, --help               help for integration
+  -n, --namespace string   The namespace to use for the integration (default "default")
+
+Global Flags:
+      --config string        config file (default is $HOME/.k8sgpt.yaml)
+      --kubeconfig string    Path to a kubeconfig. Only required if out-of-cluster. (default "/root/.kube/config")
+      --kubecontext string   Kubernetes context to use. Only required if out-of-cluster.
+
+Use "k8sgpt integration [command] --help" for more information about a command.
+controlplane:~$ k8sgpt analyze           
+Error: AI provider openai not specified in configuration. Please run k8sgpt auth
+Error: AI provider not specified in configuration
+controlplane:~$ k8sgpt auth   
+Using openai as backend AI provider
+Enter openai Key: New provider added
+key added
+controlplane:~$ k8sgpt analyze
+W0105 04:13:05.996228   20284 warnings.go:70] v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+
+No problems detected
+
+controlplane:~$ k8sgpt help   
+Kubernetes debugging powered by AI
+
+Usage:
+  k8sgpt [command]
+
+Available Commands:
+  analyze     This command will find problems within your Kubernetes cluster
+  auth        Authenticate with your chosen backend
+  completion  Generate the autocompletion script for the specified shell
+  filters     Manage filters for analyzing Kubernetes resources
+  generate    Generate Key for your chosen backend (opens browser)
+  help        Help about any command
+  integration Intergrate another tool into K8sGPT
+  serve       Runs k8sgpt as a server
+  version     Print the version number of k8sgpt
+
+Flags:
+      --config string        config file (default is $HOME/.k8sgpt.yaml)
+  -h, --help                 help for k8sgpt
+      --kubeconfig string    Path to a kubeconfig. Only required if out-of-cluster. (default "/root/.kube/config")
+      --kubecontext string   Kubernetes context to use. Only required if out-of-cluster.
+
+Use "k8sgpt [command] --help" for more information about a command.
+controlplane:~$ k8sgpt filter --help
+The filters command allows you to manage filters that are used to analyze Kubernetes resources.
+        You can list available filters to analyze resources.
+
+Usage:
+  k8sgpt filters [flags]
+  k8sgpt filters [command]
+
+Aliases:
+  filters, filter
+
+Available Commands:
+  add         Adds one or more new filters.
+  list        List available filters
+  remove      Remove one or more filters.
+
+Flags:
+  -h, --help   help for filters
+
+Global Flags:
+      --config string        config file (default is $HOME/.k8sgpt.yaml)
+      --kubeconfig string    Path to a kubeconfig. Only required if out-of-cluster. (default "/root/.kube/config")
+      --kubecontext string   Kubernetes context to use. Only required if out-of-cluster.
+
+Use "k8sgpt filters [command] --help" for more information about a command.
+controlplane:~$ k8sgpt filter list  
+Active: 
+> Node
+> Pod
+> PersistentVolumeClaim
+> Service
+> StatefulSet
+> CronJob
+> Deployment
+> ReplicaSet
+> Ingress
+Unused: 
+> HorizontalPodAutoScaler
+> PodDisruptionBudget
+> NetworkPolicy
+controlplane:~$ k8sgpt filter node
+controlplane:~$ k8sgpt filter Node
+controlplane:~$ k8sgpt filter POD 
+controlplane:~$ k8sgpt filter pod
+controlplane:~$ k8sgpt filter pod --help
+The filters command allows you to manage filters that are used to analyze Kubernetes resources.
+        You can list available filters to analyze resources.
+
+Usage:
+  k8sgpt filters [flags]
+  k8sgpt filters [command]
+
+Aliases:
+  filters, filter
+
+Available Commands:
+  add         Adds one or more new filters.
+  list        List available filters
+  remove      Remove one or more filters.
+
+Flags:
+  -h, --help   help for filters
+
+Global Flags:
+      --config string        config file (default is $HOME/.k8sgpt.yaml)
+      --kubeconfig string    Path to a kubeconfig. Only required if out-of-cluster. (default "/root/.kube/config")
+      --kubecontext string   Kubernetes context to use. Only required if out-of-cluster.
+
+Use "k8sgpt filters [command] --help" for more information about a command.
+controlplane:~$ k8sgpt filters pod
+controlplane:~$ k8sgpt analyze    
+W0105 04:14:55.634741   21192 warnings.go:70] v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+
+No problems detected
+
+controlplane:~$ k8sgpt analyze --help
+This command will find problems within your Kubernetes cluster and
+        provide you with a list of issues that need to be resolved
+
+Usage:
+  k8sgpt analyze [flags]
+
+Aliases:
+  analyze, analyse
+
+Flags:
+  -a, --anonymize          Anonymize data before sending it to the AI backend. This flag masks sensitive data, such as Kubernetes object names and labels, by replacing it with a key. However, please note that this flag does not currently apply to events.
+  -b, --backend string     Backend AI provider (default "openai")
+  -e, --explain            Explain the problem to me
+  -f, --filter strings     Filter for these analyzers (e.g. Pod, PersistentVolumeClaim, Service, ReplicaSet)
+  -h, --help               help for analyze
+  -l, --language string    Languages to use for AI (e.g. 'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Dutch', 'Russian', 'Chinese', 'Japanese', 'Korean') (default "english")
+  -n, --namespace string   Namespace to analyze
+  -c, --no-cache           Do not use cached data
+  -o, --output string      Output format (text, json) (default "text")
+
+Global Flags:
+      --config string        config file (default is $HOME/.k8sgpt.yaml)
+      --kubeconfig string    Path to a kubeconfig. Only required if out-of-cluster. (default "/root/.kube/config")
+      --kubecontext string   Kubernetes context to use. Only required if out-of-cluster.
+controlplane:~$ k8sgpt analyze -f node
+Error: "node" filter does not exist. Please run k8sgpt filters list.
+controlplane:~$ k8sgpt analyze -f Node
+
+No problems detected
+
+controlplane:~$ k8sgpt analyze -f Pod 
+
+No problems detected
+
+controlplane:~$ k8sgpt analyze -f Ingress
+
+No problems detected
+
+controlplane:~$ 
+controlplane:~$ 
+controlplane:~$ k8sgpt analyze -b noopai --explain
+Error: AI provider noopai not specified in configuration. Please run k8sgpt auth
+Error: AI provider not specified in configuration
+controlplane:~$ k8sgpt analyze  --explain
+W0105 04:16:51.730916   22130 warnings.go:70] v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+
+No problems detected
+
+controlplane:~$ k8sgpt analyze  --explain anonymize
+W0105 04:17:03.827072   22236 warnings.go:70] v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+
+No problems detected
+
+controlplane:~$ k8sgpt analyze --namespace k8sgpt
+W0105 04:17:20.706824   22377 warnings.go:70] v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+
+No problems detected
+
+controlplane:~$ k8sgpt filters add PodDisruptionBudget
+Filter PodDisruptionBudget added
+controlplane:~$ k8sgpt filters list                   
+Active: 
+> ReplicaSet
+> Pod
+> PodDisruptionBudget
+> Node
+> Deployment
+> CronJob
+> Service
+> PersistentVolumeClaim
+> Ingress
+> StatefulSet
+Unused: 
+> HorizontalPodAutoScaler
+> NetworkPolicy
+controlplane:~$ k8sgpt analyze -f PodDisruptionBudget
+
+No problems detected
+
+controlplane:~$ k8sgpt analyze -b noopai --filter VulnerabilityReport
+Error: AI provider noopai not specified in configuration. Please run k8sgpt auth
+Error: AI provider not specified in configuration
+controlplane:~$ k8sgpt analyze  --filter VulnerabilityReport
+Error: "VulnerabilityReport" filter does not exist. Please run k8sgpt filters list.
+controlplane:~$ k8sgpt analyze  --filter VulnerabilityReport^C
+controlplane:~$ k8sgpt integration activate trivy
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:58 creating 1 resource(s)
+2026/01/05 04:18:59 Clearing discovery cache
+2026/01/05 04:18:59 beginning wait for 12 resources with timeout of 1m0s
+2026/01/05 04:19:00 creating 21 resource(s)
+2026/01/05 04:19:01 release installed successfully: trivy-operator-k8sgpt/trivy-operator-0.31.0
+Activated integration trivy
+controlplane:~$ k8sgpt analyze  --filter VulnerabilityReport
+
+No problems detected
+
+
