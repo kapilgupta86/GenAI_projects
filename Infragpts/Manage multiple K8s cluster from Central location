@@ -1,0 +1,69 @@
+## Prepare Kubeconfig
+
+Merge kubeconfigs from all clusters into a single file at `~/.kube/config` or a custom path.
+
+- Run `KUBECONFIG=~/.kube/config1:~/.kube/config2:~/.kube/config3 kubectl config view --flatten > ~/.kube/multi-config` for multiple files.[^3][^2]
+- List contexts: `kubectl config get-contexts -f ~/.kube/multi-config`.
+- Switch: `kubectl config use-context cluster1-context --kubeconfig=~/.kube/multi-config`.[^4]
+
+Your setup already uses `--kubeconfig /root/.kube/config` by default.[^5]
+
+## Authenticate AI Backend
+
+Ensure OpenAI (or preferred provider) is set once per central machine.
+
+```
+k8sgpt auth add -b openai
+# Enter your key when prompted
+k8sgpt auth default -p openai
+```
+
+This persists for all analyses; your logs confirm it works.[^5]
+
+## Analyze Single Cluster
+
+Target specific clusters via flags, matching your examples.
+
+```
+k8sgpt analyze --kubeconfig=~/.kube/multi-config --kubecontext=cluster1-context --explain --filter Pod,Deployment
+```
+
+- `--explain`: AI insights (add `--anonymize` for data masking).[^1]
+- `--filter`: Limit analyzers, e.g., `-f Node,Service` as you tested.[^5]
+- `--namespace`: Scope, e.g., `--n default`.[^6]
+
+Your scans detected issues like unavailable replicas and unused ConfigMaps.[^5]
+
+## Multi-Cluster Script
+
+Script sequential analysis for central monitoring; output to files for review.
+
+```bash
+#!/bin/bash
+CONFIG=~/.kube/multi-config
+CLUSTERS=("cluster1-context" "cluster2-context" "cluster3-context")
+
+for ctx in "${CLUSTERS[@]}"; do
+  echo "Analyzing $ctx..."
+  k8sgpt analyze --kubeconfig=$CONFIG --kubecontext=$ctx --explain --output=json > analysis-${ctx}.json
+done
+```
+
+Run with `./multi-analyze.sh`; aggregate JSONs via `jq` or Python for reports.[^1]
+
+## Advanced Options
+
+Use `k8sgpt serve` for API access across contexts or integrate Trivy as you did (`k8sgpt integration activate trivy`). For continuous monitoring, deploy the K8sGPT Operator per cluster instead of CLI.[^7][^5]
+<span style="display:none">[^10][^11][^12][^13][^14][^15][^16][^17][^18][^19][^20][^8][^9]</span>
+
+<div align="center">⁂</div>
+
+[^1]: https://docs.k8sgpt.ai/getting-started/getting-started/
+
+[^2]: https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/
+
+[^3]: https://stackoverflow.com/questions/60655653/use-multiple-contexts-with-same-user-name-in-kubectl-config
+
+[^4]: https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/
+
+[^5]: https://k8sgpt.ai
